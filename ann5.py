@@ -119,6 +119,56 @@ class Dropout(BaseModule):
             return self.p_keep * forward_input
 
 
+class BatchNormalization(ParameterModule):
+    '''Provides batch-normalization'''
+    def __init__(self, size: int, decay=0.99, epsilon=10e-8):
+        super().__init__()
+        self.gamma = np.ones(size)
+        self.beta = np.zeros(size)
+        self.parameters = [self.gamma, self.beta]
+        self.decay = decay
+        self.epsilon = epsilon
+        self._input = None
+        self.first = True
+        self.running_mean = 0
+        self.running_var = 0
+        self.batch_mean = 0
+        self.batch_var = 0
+
+    def forward(self, forward_input: np.ndarray, is_training=True):
+        if is_training:
+            # Perform batch normalization during training
+            self.batch_mean = forward_input.mean(axis=0)
+            self.batch_var = forward_input.var(axis=0)
+            # Update running mean/var
+            if self.first:
+                self.running_mean = self.batch_mean
+                self.running_var = self.batch_var
+                self.first = False
+            else:
+                self.running_mean = (self.decay * self.running_mean) + ((1 - self.decay) * self.batch_mean)
+                self.running_var = (self.decay * self.running_var) + ((1 - self.decay) * self.batch_var)
+            # Standardize input, save for backpropagation
+            self._input = (forward_input - self.batch_mean) / np.sqrt(self.batch_var + self.epsilon)
+            return (self.gamma * self._input) + self.beta
+        else:
+            z_hat_test = (forward_input - self.running_mean) / np.sqrt(self.running_var + self.epsilon)
+            return (self.gamma * z_hat_test) + self.beta
+
+    def get_gradients(self, delta: np.ndarray, reg: float) -> List[np.ndarray]:
+        assert(delta.shape == self._input.shape)
+        grad_gamma = np.multiply(delta, self._input).sum(axis=0) + reg * self.gamma
+        grad_beta = delta.sum(axis=0) + reg * self.beta
+        return [grad_gamma, grad_beta]
+
+    def update_delta(self, delta: np.ndarray) -> np.ndarray:
+        assert(delta.shape[1] == self.gamma.shape[0])
+        return (delta * self.gamma) / np.sqrt(self.batch_var + self.epsilon)
+
+    def params(self) -> List[np.ndarray]:
+        return self.parameters
+
+
 class ActivationFunction(DifferentiableModule):
     '''Wrapper class for an activation function'''
     def __init__(self, activation_function: str):
@@ -714,14 +764,14 @@ def main():
     k_classes = len(set(y_train))
     ann = NeuralNetwork(
         layers=[
-            Dropout(p_keep=0.8),
             LinearLayer(n_in=x_train.shape[1], n_out=500),
+            BatchNormalization(size=500),
             ReLU(),
-            Dropout(p_keep=0.5),
             LinearLayer(n_in=500, n_out=300),
+            BatchNormalization(size=300),
             ReLU(),
-            Dropout(p_keep=0.5),
             LinearLayer(n_in=300, n_out=300),
+            BatchNormalization(size=300),
             ReLU(),
             LinearLayer(n_in=300, n_out=k_classes),
             Softmax()
@@ -732,7 +782,7 @@ def main():
     # optimizer = StandardOptimizer(lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
     optimizer = AdamOptimizer()
     objective_func = SparseCategoricalCrossEntropy()
-    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=5000, epochs=30, reg=0.0,
+    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=500, epochs=20, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
