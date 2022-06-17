@@ -764,13 +764,16 @@ def main():
     k_classes = len(set(y_train))
     ann = NeuralNetwork(
         layers=[
-            LinearLayer(n_in=x_train.shape[1], n_out=500),
+            LinearLayer(n_in=x_train.shape[1], n_out=1500),
+            BatchNormalization(size=1500),
+            ReLU(),
+            LinearLayer(n_in=1500, n_out=1000),
+            BatchNormalization(size=1000),
+            ReLU(),
+            LinearLayer(n_in=1000, n_out=500),
             BatchNormalization(size=500),
             ReLU(),
             LinearLayer(n_in=500, n_out=300),
-            BatchNormalization(size=300),
-            ReLU(),
-            LinearLayer(n_in=300, n_out=300),
             BatchNormalization(size=300),
             ReLU(),
             LinearLayer(n_in=300, n_out=k_classes),
@@ -782,7 +785,7 @@ def main():
     # optimizer = StandardOptimizer(lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
     optimizer = AdamOptimizer()
     objective_func = SparseCategoricalCrossEntropy()
-    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=500, epochs=20, reg=0.,
+    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=300, epochs=10, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
