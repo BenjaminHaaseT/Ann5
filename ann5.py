@@ -82,7 +82,10 @@ class InputLinearLayer(InputLayer):
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
             self.input_ = forward_input
-        return forward_input.dot(self.weights) + self.bias
+        if len(self.parameters) == 2:
+            return forward_input.dot(self.weights) + self.bias
+        else:
+            return forward_input.dot(self.weights)
 
     def get_gradients(self, delta: np.ndarray, reg: float) -> List[np.ndarray]:
         grad_w = self.input_.T.dot(delta) + reg * self.weights
@@ -97,8 +100,8 @@ class InputLinearLayer(InputLayer):
 
 class LinearLayer(InputLinearLayer):
     '''For a hidden linear layer'''
-    def __init__(self, n_in: int, n_out: int):
-        super().__init__(n_in, n_out)
+    def __init__(self, n_in: int, n_out: int, bias=True):
+        super().__init__(n_in, n_out, bias)
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
         return delta.dot(self.weights.T)
@@ -760,20 +763,20 @@ class NeuralNetwork(object):
 
 
 def main():
-    x_train, x_validate, y_train, y_validate = ut.get_mnist()
+    x_train, x_validate, y_train, y_validate = ut.get_mnist(normalize=False)
     k_classes = len(set(y_train))
     ann = NeuralNetwork(
         layers=[
-            LinearLayer(n_in=x_train.shape[1], n_out=1500),
+            LinearLayer(n_in=x_train.shape[1], n_out=1500, bias=False),
             BatchNormalization(size=1500),
             ReLU(),
-            LinearLayer(n_in=1500, n_out=1000),
+            LinearLayer(n_in=1500, n_out=1000, bias=False),
             BatchNormalization(size=1000),
             ReLU(),
-            LinearLayer(n_in=1000, n_out=500),
+            LinearLayer(n_in=1000, n_out=500, bias=False),
             BatchNormalization(size=500),
             ReLU(),
-            LinearLayer(n_in=500, n_out=300),
+            LinearLayer(n_in=500, n_out=300, bias=False),
             BatchNormalization(size=300),
             ReLU(),
             LinearLayer(n_in=300, n_out=k_classes),
@@ -785,7 +788,7 @@ def main():
     # optimizer = StandardOptimizer(lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
     optimizer = AdamOptimizer()
     objective_func = SparseCategoricalCrossEntropy()
-    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=300, epochs=10, reg=0.,
+    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=300, epochs=30, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
