@@ -271,7 +271,7 @@ class SparseCategoricalCrossEntropy(ObjectiveFunction):
         activations[np.arange(targets.shape[0]), targets] -= np.ones_like(targets)
         return activations
 
- #class BinaryCrossEntropy(ObjectiveFunction):
+#class BinaryCrossEntropy(ObjectiveFunction):
 
 class LearningRateScheduler(object):
     '''Base class for a learning rate scheduler, to aid learning rate scheduling'''
