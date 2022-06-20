@@ -57,6 +57,14 @@ def sparse_cross_entropy(targets: np.ndarray, p_y: np.ndarray) -> float:
     return -np.mean(tot)
 
 
+def binary_cross_entropy(targets: np.ndarray, activations: np.ndarray) -> float:
+    '''Performs binary cross entropy'''
+    activations = np.ravel(activations)
+    tot = np.multiply(targets, np.log(activations)) + \
+          np.multiply(np.ones_like(targets) - targets, np.log(np.ones_like(activations) - activations))
+    return -np.mean(tot)
+
+
 def mse(targets: np.ndarray, y_hat: np.ndarray) -> float:
     '''Computes basice Mean Squared Error'''
     sse = np.sum(np.power(targets - y_hat, 2))

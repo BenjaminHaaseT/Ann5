@@ -71,8 +71,11 @@ class InputLinearLayer(InputLayer):
     '''Input layer that performs a linear transformation'''
     def __init__(self, n_in: int, n_out: int, bias=True):
         super().__init__()
-        self.weights = np.random.randn(n_in, n_out) * np.sqrt(2 / (n_in + n_out))
-        self.input_ = None
+        if n_out > 1:
+            self.weights = np.random.randn(n_in, n_out) * np.sqrt(2 / (n_in + n_out))
+            self.input_ = None
+        else:
+            self.weights = np.random.randn(n_in) * np.sqrt(2 / (n_in + n_out))
         if bias:
             self.bias = np.zeros(n_out)
             self.parameters = [self.weights, self.bias]
@@ -192,8 +195,15 @@ class ActivationFunction(DifferentiableModule):
 
 class Sigmoid(ActivationFunction):
     '''Wrapper class for sigmoid activation function'''
-    def __init__(self):
+    def __init__(self, is_final=False):
         super().__init__('sigmoid')
+    #     self.is_final = is_final
+    #
+    # def update_delta(self, delta: np.ndarray) -> np.ndarray:
+    #     if self.is_final:
+    #         return np.multiply(delta, self.gradient_function(np.ravel(self.activations)))
+    #     return np.multiply(delta, self.gradient_function(self.activations))
+
 
 
 class Tanh(ActivationFunction):
@@ -271,7 +281,22 @@ class SparseCategoricalCrossEntropy(ObjectiveFunction):
         activations[np.arange(targets.shape[0]), targets] -= np.ones_like(targets)
         return activations
 
-#class BinaryCrossEntropy(ObjectiveFunction):
+
+class BinaryCrossEntropy(ObjectiveFunction):
+    '''For binary classification, assumes inputs are from the Sigmoid'''
+    def __init__(self):
+        super().__init__()
+
+    def loss(self, activations: np.ndarray, targets: np.ndarray) -> float:
+        return ut.binary_cross_entropy(targets, activations)
+
+    def predict(self, activations: np.ndarray) -> np.ndarray:
+        return np.round(activations)
+
+    def get_delta(self, activations: np.ndarray, targets: np.ndarray) -> np.ndarray:
+        activations = np.ravel(activations)
+        return ((np.ones_like(targets) - targets) / (np.ones_like(activations) - activations)) - (targets / activations)
+
 
 class LearningRateScheduler(object):
     '''Base class for a learning rate scheduler, to aid learning rate scheduling'''
@@ -741,7 +766,7 @@ class NeuralNetwork(object):
             validation_losses.append(validation_loss)
 
             # Display every 'n' epochs
-            if epoch % 3 == 0:
+            if epoch % 1 == 0:
                 print(f'epoch {epoch}')
                 print(f'Training Loss: {training_loss:.4f}')
                 print(f'Validation Loss: {validation_loss:.4f}')
@@ -764,20 +789,17 @@ class NeuralNetwork(object):
 
 
 def main():
-    x_train, x_validate, y_train, y_validate = ut.get_mnist(normalize=False)
+    x_train, x_validate, y_train, y_validate = ut.get_mnist()
     k_classes = len(set(y_train))
     ann = NeuralNetwork(
         layers=[
-            LinearLayer(n_in=x_train.shape[1], n_out=1500, bias=False),
-            BatchNormalization(size=1500),
+            LinearLayer(n_in=x_train.shape[1], n_out=1200, bias=True),
+            BatchNormalization(size=1200),
             ReLU(),
-            LinearLayer(n_in=1500, n_out=1000, bias=False),
-            BatchNormalization(size=1000),
+            LinearLayer(n_in=1200, n_out=600, bias=True),
+            BatchNormalization(size=600),
             ReLU(),
-            LinearLayer(n_in=1000, n_out=500, bias=False),
-            BatchNormalization(size=500),
-            ReLU(),
-            LinearLayer(n_in=500, n_out=300, bias=False),
+            LinearLayer(n_in=600, n_out=300, bias=True),
             BatchNormalization(size=300),
             ReLU(),
             LinearLayer(n_in=300, n_out=k_classes),
@@ -785,11 +807,11 @@ def main():
         ]
     )
 
-    scheduler = RMSProp()
+    # scheduler = RMSProp()
     # optimizer = StandardOptimizer(lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
     optimizer = AdamOptimizer()
     objective_func = SparseCategoricalCrossEntropy()
-    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=300, epochs=30, reg=0.,
+    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=50, epochs=10, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
