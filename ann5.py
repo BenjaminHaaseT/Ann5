@@ -313,6 +313,9 @@ class LearningRateScheduler(object):
         pass
 
 
+# class ExponentialLearningRateScheduler(LearningRateScheduler):
+
+
 class AdaGrad(LearningRateScheduler):
     '''Provides AdaGrad adaptive learning rate functionality'''
     def __init__(self, epsilon=10e-8):
