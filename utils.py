@@ -66,7 +66,9 @@ def binary_cross_entropy(targets: np.ndarray, activations: np.ndarray) -> float:
 
 
 def binary_cross_entropy_with_logits(targets: np.ndarray, activations: np.ndarray) -> float:
+    # Perfroms bce with logits
     pass
+
 
 def mse(targets: np.ndarray, y_hat: np.ndarray) -> float:
     '''Computes basice Mean Squared Error'''
