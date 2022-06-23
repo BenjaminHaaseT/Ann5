@@ -197,13 +197,6 @@ class Sigmoid(ActivationFunction):
     '''Wrapper class for sigmoid activation function'''
     def __init__(self, is_final=False):
         super().__init__('sigmoid')
-    #     self.is_final = is_final
-    #
-    # def update_delta(self, delta: np.ndarray) -> np.ndarray:
-    #     if self.is_final:
-    #         return np.multiply(delta, self.gradient_function(np.ravel(self.activations)))
-    #     return np.multiply(delta, self.gradient_function(self.activations))
-
 
 
 class Tanh(ActivationFunction):
