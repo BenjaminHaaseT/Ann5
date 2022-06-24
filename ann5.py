@@ -195,7 +195,7 @@ class ActivationFunction(DifferentiableModule):
 
 class Sigmoid(ActivationFunction):
     '''Wrapper class for sigmoid activation function'''
-    def __init__(self, is_final=False):
+    def __init__(self):
         super().__init__('sigmoid')
 
 
@@ -785,21 +785,14 @@ class NeuralNetwork(object):
 
 
 def main():
-    x_train, x_validate, y_train, y_validate = ut.get_mnist()
+    x_train, x_validate, y_train, y_validate = ut.get_mnist(normalize=True)
     k_classes = len(set(y_train))
     objective_func = SparseCategoricalCrossEntropy()
     ann = NeuralNetwork(
         layers=[
-            LinearLayer(n_in=x_train.shape[1], n_out=1200, bias=True),
-            BatchNormalization(size=1200),
+            LinearLayer(n_in=x_train.shape[1], n_out=128),
             ReLU(),
-            LinearLayer(n_in=1200, n_out=600, bias=True),
-            BatchNormalization(size=600),
-            ReLU(),
-            LinearLayer(n_in=600, n_out=300, bias=True),
-            BatchNormalization(size=300),
-            ReLU(),
-            LinearLayer(n_in=300, n_out=k_classes),
+            LinearLayer(n_in=128, n_out=k_classes),
             Softmax()
         ],
         objective=objective_func
@@ -809,13 +802,14 @@ def main():
     # optimizer = StandardOptimizer(lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
     optimizer = AdamOptimizer()
 
-    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-3, batch_size=30, epochs=10, reg=0.,
+    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-4, batch_size=128, epochs=10, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
     print(f"Final training classification rate: {final_training_classification_rate:.4f}")
     print(f"Final validation classification rate: {final_validation_classification_rate:.4f}")
 
+    # Testing!
 
 if __name__ == '__main__':
     main()
