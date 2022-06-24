@@ -701,19 +701,19 @@ class MiniBatchTrainer(Trainer):
 
 class NeuralNetwork(object):
     '''Base class for a simple feed forward neural net'''
-    def __init__(self, layers: List[BaseModule]):
+    def __init__(self, layers: List[BaseModule], objective: ObjectiveFunction):
         self.layers = layers
+        self.objective_function = objective
 
-    def set_up(self, optimizer: Optimizer, objective_function: ObjectiveFunction, batch_size=None):
+    def set_up(self, optimizer: Optimizer, batch_size=None):
         print("Setting up neural network...")
-        self.objective_function = objective_function
         optimizer.set_up(self.layers)
         if batch_size is None:
             self.trainer = FullGDTrainer()
         elif isinstance(batch_size, int) and batch_size > 0:
             self.trainer = MiniBatchTrainer(batch_size=batch_size)
         else:
-            raise Exception("Invalid batch size, please enter a positive integer batchsize or leave as None")
+            raise ValueError("Invalid batch size, please enter a positive integer batch size or leave as None")
         print("Set up complete")
 
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
@@ -722,10 +722,10 @@ class NeuralNetwork(object):
             out = layer.forward(out, is_training)
         return out
 
-    def fit(self, x_train: np.ndarray, y_train: np.ndarray, objective_function: ObjectiveFunction, optimizer: Optimizer,
+    def fit(self, x_train: np.ndarray, y_train: np.ndarray, optimizer: Optimizer,
             lr=10e-6, epochs=10000, reg=0.0, validation_prop=0.33, validation_data=None, batch_size=None, show_fig=False):
         # Set up
-        self.set_up(optimizer, objective_function, batch_size)
+        self.set_up(optimizer, batch_size)
 
         if validation_data is None:
             # Shuffle data
@@ -787,6 +787,7 @@ class NeuralNetwork(object):
 def main():
     x_train, x_validate, y_train, y_validate = ut.get_mnist()
     k_classes = len(set(y_train))
+    objective_func = SparseCategoricalCrossEntropy()
     ann = NeuralNetwork(
         layers=[
             LinearLayer(n_in=x_train.shape[1], n_out=1200, bias=True),
@@ -800,14 +801,15 @@ def main():
             ReLU(),
             LinearLayer(n_in=300, n_out=k_classes),
             Softmax()
-        ]
+        ],
+        objective=objective_func
     )
 
     # scheduler = RMSProp()
     # optimizer = StandardOptimizer(lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
     optimizer = AdamOptimizer()
-    objective_func = SparseCategoricalCrossEntropy()
-    ann.fit(x_train, y_train, objective_function=objective_func, optimizer=optimizer, lr=10e-3, batch_size=50, epochs=10, reg=0.,
+
+    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-3, batch_size=30, epochs=10, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
