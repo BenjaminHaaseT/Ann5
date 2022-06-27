@@ -70,10 +70,38 @@ def binary_cross_entropy_with_logits(targets: np.ndarray, activations: np.ndarra
     pass
 
 
-def mse(targets: np.ndarray, y_hat: np.ndarray) -> float:
+def mse(targets: np.ndarray, activations: np.ndarray) -> float:
     '''Computes basice Mean Squared Error'''
-    sse = np.sum(np.power(targets - y_hat, 2))
+    sse = np.sum(np.power(targets - activations, 2))
     return sse / len(targets)
+
+
+def convolution(image: np.ndarray, kernel: np.ndarray, mode: str = "valid") -> np.ndarray:
+    """
+    Performs convolution on a given 3-d image with a given 4-d kernel, outputs a 3-d image,
+    i.e. an array of feature maps.
+
+
+    :param image:
+    :param kernel:
+    :param mode:
+    :return:
+    """
+
+    if mode == "valid":
+        output_dim1 = image.shape[0] - kernel.shape[1] + 1
+        output_dim2 = image.shape[1] - kernel.shape[2] + 1
+        output_dim3 = kernel.shape[3]
+        output = np.zeros((output_dim1, output_dim2, output_dim3))
+
+        for c in range(output.shape[2]):
+            for i in range(output.shape[0]):
+                for j in range(output.shape[1]):
+                    im_slice = image[i: i + kernel.shape[1], j: j + kernel.shape[2], :]
+                    ker_slice = kernel[:, :, :, c].T
+                    output[i, j, c] = im_slice.flatten().dot(ker_slice.flatten())
+
+        return output
 
 
 def get_spirals():

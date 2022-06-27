@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import ann5
 import torch
 import torch.nn as nn
@@ -13,7 +14,6 @@ train_data = torchvision.datasets.MNIST(
     transform=transforms.ToTensor(),
     download=True
 )
-
 
 test_data = torchvision.datasets.MNIST(
     root=".",
@@ -59,14 +59,14 @@ test_losses = []
 for epoch in range(10):
     tot_train_loss, n_batches = 0, 0
     for inputs, targets in train_loader:
+        # Zero grad
+        optimizer.zero_grad()
 
         # Send inputs, targets to device
         inputs, targets = inputs.to(device), targets.to(device)
 
         # Reshape inputs
         inputs = inputs.view(-1, 784)
-
-        optimizer.zero_grad()
 
         # Forward pass
         activations = model(inputs)
@@ -106,9 +106,36 @@ plt.plot(test_losses, color="red", label="Test Loss")
 plt.legend()
 plt.show()
 
+# Get accuracy
+with torch.no_grad():
+    n_correct, n_total = 0, 0
+    for inputs, targets in train_loader:
+        # move to device
+        inputs, targets = inputs.to(device), targets.to(device)
+        inputs = inputs.view(-1, 784)
+        activations = model(inputs)
+        _, predictions = torch.max(activations, 1)
+        n_correct += (predictions == targets).sum().item()
+        n_total += targets.shape[0]
+
+    training_acc = n_correct / n_total
+
+    # Repeat for test set
+    n_correct, n_total = 0, 0
+
+    for inputs, targets in test_loader:
+        # Move to device
+        inputs, targets = inputs.to(device), targets.to(device)
+        inputs = inputs.view(-1, 784)
+        activations = model(inputs)
+        _, predictions = torch.max(activations, 1)
+        n_correct += (predictions == targets).sum().item()
+        n_total += targets.shape[0]
+
+    test_acc = n_correct / n_total
 
 
-
+print(f"Final training accuracy: {training_acc:.4f}, Final Testing accuracy: {test_acc:.4f}")
 
 
 # Trial with ann5.py
@@ -156,4 +183,78 @@ model.fit(
 
 train_acc = model.score(x_train, y_train)
 valid_acc = model.score(x_test, y_test)
-print(f"Final train acc: {train_acc:.4f}, final test acc: {valid_acc:.4f}")
+print(f"Final training accuracy: {train_acc:.4f}, final testing accuracy: {valid_acc:.4f}")
+
+
+# Regression
+# Generate data
+N = 10000
+X = np.random.random((N, 2)) * 6 - 3
+Y = np.cos(2 * X[:, 0]) + np.cos(3 * X[:, 1])
+Y = Y.reshape(len(Y), 1)
+
+# Plot data
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(X[:, 0], X[:, 1], Y)
+plt.show()
+
+X = torch.from_numpy(X.astype(np.float32))
+Y = torch.from_numpy(Y.astype(np.float32))
+
+# Build model
+model = nn.Sequential(
+    nn.Linear(2, 128),
+    nn.ReLU(),
+    nn.Linear(128, 1)
+)
+
+# Loss and optimizer
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+losses = []
+for epoch in range(1000):
+    # zero grad
+    optimizer.zero_grad()
+
+    # Forward pass
+    activations = model(X)
+    loss = criterion(activations, Y)
+    losses.append(loss.item())
+
+    # Gradient descent
+    loss.backward()
+    optimizer.step()
+
+    if epoch % 50 == 0:
+        print(f"Epoch {epoch}/1000, Loss: {loss.item():.4f}")
+
+# Plot loss per epoch
+plt.title("Loss Per Epoch")
+plt.plot(losses)
+plt.show()
+
+# Plot predicted surface
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+# Surface plot
+with torch.no_grad():
+    line = np.linspace(-3, 3, 50)
+    x1, x2 = np.meshgrid(line, line)
+    x_grid = np.vstack((x1.flatten(), x2.flatten())).T
+    x_grid_torch = torch.from_numpy(x_grid.astype(np.float32))
+    y_hat = model(x_grid_torch).numpy().flatten()
+    ax.plot_trisurf(x_grid[:, 0], x_grid[:, 1], y_hat)
+    plt.show()
+
+# Test with ann5
+model = ann5.NeuralNetwork(
+    layers=[
+        ann5.LinearLayer(n_in=2, n_out=128),
+        ann5.ReLU(),
+        ann5.LinearLayer(128, 1)
+    ],
+    objective=ann5.MSE()
+)

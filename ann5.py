@@ -107,7 +107,13 @@ class LinearLayer(InputLinearLayer):
         super().__init__(n_in, n_out, bias)
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
-        return delta.dot(self.weights.T)
+        if len(self.weights.shape) == 2:
+            return delta.dot(self.weights.T)
+        else:
+            assert(len(delta.shape) == 1 == len(self.weights.shape))
+            delta = delta.reshape(delta.shape[0], 1)
+            dw = self.weights.reshape(self.weights.shape[0], 1)
+            return delta.dot(dw.T)
 
 
 class Dropout(BaseModule):
@@ -289,6 +295,22 @@ class BinaryCrossEntropy(ObjectiveFunction):
     def get_delta(self, activations: np.ndarray, targets: np.ndarray) -> np.ndarray:
         activations = np.ravel(activations)
         return ((np.ones_like(targets) - targets) / (np.ones_like(activations) - activations)) - (targets / activations)
+
+
+class MeanSquaredError(ObjectiveFunction):
+    """For setting MSE as the objective, intended for prediction"""
+    def __init__(self):
+        super().__init__()
+
+    def loss(self, activations: np.ndarray, targets: np.ndarray) -> float:
+        return ut.mse(activations=activations, targets=targets)
+
+    def predict(self, activations: np.ndarray) -> np.ndarray:
+        """Identity function"""
+        return activations
+
+    def get_delta(self, activations: np.ndarray, targets: np.ndarray) -> np.ndarray:
+        return (2 / targets.shape[0]) * (activations - targets)
 
 
 class LearningRateScheduler(object):
