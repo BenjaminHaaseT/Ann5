@@ -76,12 +76,16 @@ def mse(targets: np.ndarray, activations: np.ndarray) -> float:
     return sse / len(targets)
 
 
-def convolution(image: np.ndarray, kernel: np.ndarray, mode: str = "valid") -> np.ndarray:
+def convolution(image: np.ndarray, kernel: np.ndarray, mode: str = "valid", stride: int = 1) -> np.ndarray:
     """
-    Performs convolution on a given 3-d image with a given 4-d kernel, outputs a 3-d image,
-    i.e. an array of feature maps.
+    Performs convolution on a 3-d image and 4-d tensor `kernel`, to produce a 3-d output
+    i.e. a set of 2-d feature maps.
 
+    As it stands image dimension and kernel dimension must be appropriate
+    in order to output meaningful results using stride.
+    In other words the dimensions of the image minus dimensions of kernel must be divisible by stride.
 
+    To be used for convolutional neural networks
     :param image:
     :param kernel:
     :param mode:
@@ -89,19 +93,67 @@ def convolution(image: np.ndarray, kernel: np.ndarray, mode: str = "valid") -> n
     """
 
     if mode == "valid":
-        output_dim1 = image.shape[0] - kernel.shape[1] + 1
-        output_dim2 = image.shape[1] - kernel.shape[2] + 1
+        output_dim1 = ((image.shape[0] - kernel.shape[0]) // stride) + 1
+        output_dim2 = ((image.shape[1] - kernel.shape[1]) // stride) + 1
         output_dim3 = kernel.shape[3]
-        output = np.zeros((output_dim1, output_dim2, output_dim3))
-
+        output = np.zeros(shape=(output_dim1, output_dim2, output_dim3))
         for c in range(output.shape[2]):
             for i in range(output.shape[0]):
                 for j in range(output.shape[1]):
-                    im_slice = image[i: i + kernel.shape[1], j: j + kernel.shape[2], :]
-                    ker_slice = kernel[:, :, :, c].T
-                    output[i, j, c] = im_slice.flatten().dot(ker_slice.flatten())
+                    im_slice = image[(stride * i): (stride * i) + kernel.shape[0],
+                               (stride * j): (stride * j) + kernel.shape[1], :].flatten()
+                    kernel_slice = kernel[:, :, :, c].flatten()
+                    output[i, j, c] = im_slice.dot(kernel_slice)
 
         return output
+
+    elif mode == "same":
+        pad_rows = (kernel.shape[0] - 1) // 2
+        pad_cols = (kernel.shape[1] - 1) // 2
+        output_dim1 = ((image.shape[0] - kernel.shape[0] + 2 * pad_rows) // stride) + 1
+        output_dim2 = ((image.shape[1] - kernel.shape[1] + 2 * pad_cols) // stride) + 1
+        output_dim3 = kernel.shape[3]
+        output = np.zeros((output_dim1, output_dim2, output_dim3))
+        # If stride is one
+        if stride == 1:
+            for c in range(output.shape[2]):
+                for i in range(output.shape[0]):
+                    for j in range(output.shape[1]):
+                        start_row_k = max(pad_rows - i, 0)
+                        stop_row_k = min(output.shape[0] + pad_rows - i, kernel.shape[0])
+                        start_col_k = max(pad_cols - j, 0)
+                        stop_col_k = min(output.shape[1] + pad_cols - j, kernel.shape[1])
+                        # Get indices for slicing image
+                        start_row_im = max(i - pad_rows, 0)
+                        stop_row_im = min(kernel.shape[0] - pad_rows + i, output.shape[0])
+                        start_col_im = max(j - pad_cols, 0)
+                        stop_col_im = min(kernel.shape[1] - pad_cols + j, output.shape[1])
+                        im_slice = image[start_row_im: stop_row_im, start_col_im: stop_col_im, :].flatten()
+                        ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c].flatten()
+                        output[i, j, c] = im_slice.dot(ker_slice)
+
+            return output
+
+        elif stride >= 2:
+            for c in range(output.shape[2]):
+                for i in range(output.shape[0]):
+                    for j in range(output.shape[1]):
+                        # Get indices for slicing kernel
+                        start_row_k = max(pad_rows - (stride * i), 0)
+                        stop_row_k = min(image.shape[0] - ((stride * i) - pad_rows), kernel.shape[0])
+                        start_col_k = max(pad_cols - (stride * j), 0)
+                        stop_col_k = min(image.shape[1] + ((stride * j) - pad_cols), kernel.shape[1])
+                        # Get indices for slicing image
+                        start_row_im = max((stride * i) - pad_rows, 0)
+                        stop_row_im = min(((stride * i) - pad_rows) + kernel.shape[0], image.shape[0])
+                        start_col_im = max((stride * j) - pad_cols, 0)
+                        stop_col_im = min((stride * j) - pad_cols + kernel.shape[1], image.shape[1])
+                        # Slice image and kernel, then flatten to take advantage of dot product
+                        im_slice = image[start_row_im: stop_row_im, start_col_im: stop_col_im, :].flatten()
+                        ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c].flatten()
+                        output[i, j, c] = im_slice.dot(ker_slice)
+
+            return output
 
 
 def get_spirals():
