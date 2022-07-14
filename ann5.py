@@ -26,10 +26,6 @@ MOMENTUM_UPDATERS = {
     'nesterov': (lambda velocity, differential, mu: (mu * velocity) - differential)
 }
 
-WEIGHT_INITIALIZERS = {
-    ''
-}
-
 
 class BaseModule(object):
     '''Base class for all Layer/Module objects'''

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
+from typing import Tuple, Any
 import matplotlib.pyplot as plt
-
 
 
 def sigmoid(a: np.ndarray) -> np.ndarray:
@@ -46,14 +46,14 @@ def error_rate(targets: np.ndarray, predictions: np.ndarray) -> float:
     return 1 - classification_rate(targets, predictions)
 
 
-def cross_entropy(targets: np.ndarray, p_y: np.ndarray) -> float:
-    tot = np.multiply(targets, np.log(p_y))
+def cross_entropy(targets: np.ndarray, activations: np.ndarray) -> float:
+    tot = np.multiply(targets, np.log(activations))
     return -tot.sum()
 
 
-def sparse_cross_entropy(targets: np.ndarray, p_y: np.ndarray) -> float:
+def sparse_cross_entropy(targets: np.ndarray, activations: np.ndarray) -> float:
     '''Assumes targets are one dimensional arrays'''
-    tot = np.log(p_y[np.arange(targets.shape[0]), targets])
+    tot = np.log(activations[np.arange(targets.shape[0]), targets])
     return -np.mean(tot)
 
 
@@ -71,88 +71,134 @@ def binary_cross_entropy_with_logits(targets: np.ndarray, activations: np.ndarra
 
 
 def mse(targets: np.ndarray, activations: np.ndarray) -> float:
-    '''Computes basice Mean Squared Error'''
+    '''Computes basic Mean Squared Error'''
     sse = np.sum(np.power(targets - activations, 2))
     return sse / len(targets)
 
 
-def convolution(image: np.ndarray, kernel: np.ndarray, mode: str = "valid", stride: int = 1) -> np.ndarray:
-    """
-    Performs convolution on a 3-d image and 4-d tensor `kernel`, to produce a 3-d output
-    i.e. a set of 2-d feature maps.
-
-    As it stands image dimension and kernel dimension must be appropriate
-    in order to output meaningful results using stride.
-    In other words the dimensions of the image minus dimensions of kernel must be divisible by stride.
-
-    To be used for convolutional neural networks
+def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding: int = 0) -> np.ndarray:
+    '''
+    Performs convolution with `image` and `kernel` where `image is a 3D tensor and `kernel` is a 4D tensor, r
+    esulting in a 3D tensor. Each 2D slice of the output will be one feature map of `image`.
+    
     :param image:
     :param kernel:
-    :param mode:
+    :param stride:
+    :param padding:
     :return:
-    """
-
-    if mode == "valid":
-        output_dim1 = ((image.shape[0] - kernel.shape[0]) // stride) + 1
-        output_dim2 = ((image.shape[1] - kernel.shape[1]) // stride) + 1
-        output_dim3 = kernel.shape[3]
-        output = np.zeros(shape=(output_dim1, output_dim2, output_dim3))
-        for c in range(output.shape[2]):
-            for i in range(output.shape[0]):
-                for j in range(output.shape[1]):
-                    im_slice = image[(stride * i): (stride * i) + kernel.shape[0],
-                               (stride * j): (stride * j) + kernel.shape[1], :].flatten()
-                    kernel_slice = kernel[:, :, :, c].flatten()
-                    output[i, j, c] = im_slice.dot(kernel_slice)
-
+    '''
+    # Compute dimensions for the output
+    output_dim1 = ((image.shape[1] + 2 * padding - kernel.shape[0]) // stride) + 1
+    output_dim2 = ((image.shape[2] + 2 * padding - kernel.shape[1]) // stride) + 1
+    output_dim3 = kernel.shape[3]
+    output = np.zeros(shape=(output_dim1, output_dim2, output_dim3))
+    if padding == 0:
+        # No padding, takes advantage of numpy slicing for efficiency
+        for c2 in range(output_dim3):
+            for i in range(output_dim1):
+                for j in range(output_dim2):
+                    im_slice = image[(stride * i): (stride * i) + kernel.shape[1],
+                                     (stride * j): (stride * j) + kernel.shape[2], :].flatten()
+                    ker_slice = kernel[:, :, :, c2].flatten()
+                    output[i, j, c2] = im_slice.dot(ker_slice)
         return output
+    else:
+        pad_rows = pad_cols = padding
+        for c2 in range(output_dim3):
+            for i in range(output_dim1):
+                for j in range(output_dim2):
+                    # Get kernel indices for slicing
+                    start_row_k = max(pad_rows - (stride * i), 0)
+                    stop_row_k = min(image.shape[0] - ((stride * i) - pad_rows), kernel.shape[0])
+                    start_col_k = max(pad_cols - (stride * j), 0)
+                    stop_col_k = min(image.shape[1] - ((stride * j) - pad_cols), kernel.shape[1])
+                    # Get image indices for slicing
+                    start_row_im = max((stride * i) - pad_rows, 0)
+                    stop_row_im = min((stride * i) - pad_rows + kernel.shape[0], image.shape[0])
+                    start_col_im = max((stride * j) - pad_cols, 0)
+                    stop_col_im = min((stride * j) - pad_cols + kernel.shape[1], image.shape[1])
+                    # Slice kernel and image to take advantage of dot product
+                    im_slice = image[start_row_im: stop_row_im, start_col_im: stop_row_im, :].flatten()
+                    ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c2].flatten()
+                    output[i, j, c2] = im_slice.dot(ker_slice)
+        return output
+    
 
-    elif mode == "same":
-        pad_rows = (kernel.shape[0] - 1) // 2
-        pad_cols = (kernel.shape[1] - 1) // 2
-        output_dim1 = ((image.shape[0] - kernel.shape[0] + 2 * pad_rows) // stride) + 1
-        output_dim2 = ((image.shape[1] - kernel.shape[1] + 2 * pad_cols) // stride) + 1
-        output_dim3 = kernel.shape[3]
-        output = np.zeros((output_dim1, output_dim2, output_dim3))
-        # If stride is one
+def backward_convolution_kernel(images: np.ndarray, delta: np.ndarray, out_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> np.ndarray:
+    '''
+    Perform the necessary convolution during backpropagation. Returns the gradient with respect to the kernel.
+    :param images: 
+    :param delta: 
+    :param stride: 
+    :param padding: 
+    :return: 
+    '''
+    output = np.zeros(shape=out_shape)
+    N = images.shape[0]
+    if not padding:
+        # Perform valid convolution of some kind
         if stride == 1:
-            for c in range(output.shape[2]):
-                for i in range(output.shape[0]):
-                    for j in range(output.shape[1]):
-                        start_row_k = max(pad_rows - i, 0)
-                        stop_row_k = min(output.shape[0] + pad_rows - i, kernel.shape[0])
-                        start_col_k = max(pad_cols - j, 0)
-                        stop_col_k = min(output.shape[1] + pad_cols - j, kernel.shape[1])
-                        # Get indices for slicing image
-                        start_row_im = max(i - pad_rows, 0)
-                        stop_row_im = min(kernel.shape[0] - pad_rows + i, output.shape[0])
-                        start_col_im = max(j - pad_cols, 0)
-                        stop_col_im = min(kernel.shape[1] - pad_cols + j, output.shape[1])
-                        im_slice = image[start_row_im: stop_row_im, start_col_im: stop_col_im, :].flatten()
-                        ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c].flatten()
-                        output[i, j, c] = im_slice.dot(ker_slice)
-
+            for n in range(N):
+                for c2 in range(output.shape[3]):
+                    for c1 in range(output.shape[2]):
+                        for i in range(output.shape[0]):
+                            for j in range(output.shape[1]):
+                                im_slice = images[n, i: i + delta.shape[1], j: j + delta.shape[2], c1].flatten()
+                                del_slice = delta[n, :, :, c2].flatten()
+                                output[i, j, c1, c2] += im_slice.dot(del_slice)
             return output
-
-        elif stride >= 2:
-            for c in range(output.shape[2]):
-                for i in range(output.shape[0]):
-                    for j in range(output.shape[1]):
-                        # Get indices for slicing kernel
-                        start_row_k = max(pad_rows - (stride * i), 0)
-                        stop_row_k = min(image.shape[0] - ((stride * i) - pad_rows), kernel.shape[0])
-                        start_col_k = max(pad_cols - (stride * j), 0)
-                        stop_col_k = min(image.shape[1] + ((stride * j) - pad_cols), kernel.shape[1])
-                        # Get indices for slicing image
-                        start_row_im = max((stride * i) - pad_rows, 0)
-                        stop_row_im = min(((stride * i) - pad_rows) + kernel.shape[0], image.shape[0])
-                        start_col_im = max((stride * j) - pad_cols, 0)
-                        stop_col_im = min((stride * j) - pad_cols + kernel.shape[1], image.shape[1])
-                        # Slice image and kernel, then flatten to take advantage of dot product
-                        im_slice = image[start_row_im: stop_row_im, start_col_im: stop_col_im, :].flatten()
-                        ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c].flatten()
-                        output[i, j, c] = im_slice.dot(ker_slice)
-
+        else:
+            # valid convolution with stride, rarely employed but available
+            for n in range(N):
+                for c2 in range(output.shape[3]):
+                    for c1 in range(output.shape[2]):
+                        for i in range(output.shape[0]):
+                            for j in range(output.shape[1]):
+                                for ii in range(delta.shape[1]):
+                                    for jj in range(delta.shape[2]):
+                                        output[i, j, c1, c2] += images[n, (stride * ii) + i, (stride * jj) + j, c1] * \
+                                                                delta[n, ii, jj, c2]
+            return output
+    else:
+        # We are performing convolution with padding, either full or same
+        if stride == 1:
+            for n in range(N):
+                for c2 in range(output.shape[3]):
+                    for c1 in range(output.shape[2]):
+                        for i in range(output.shape[0]):
+                            for j in range(output.shape[1]):
+                                # Get indices for delta
+                                start_row_d = max(padding - i, 0)
+                                stop_row_d = min(images.shape[1] - i + padding, delta.shape[1])
+                                start_col_d = max(padding - j, 0)
+                                stop_col_d = min(images.shape[2] - j + padding, delta.shape[2])
+                                # Get indices for image slice
+                                start_row_im = max(i - padding, 0)
+                                stop_row_im = min(i - padding + delta.shape[1], images.shape[1])
+                                start_col_im = max(j - padding, 0)
+                                stop_col_im = min(j - padding + delta.shape[2], images.shape[2])
+                                # Get slices to take advantage of dot product
+                                im_slice = images[n, start_row_im: stop_row_im, start_col_im: stop_col_im, c1].flatten()
+                                del_slice = delta[n, start_row_d: stop_row_d, start_col_d: stop_col_d, c2].flatten()
+                                output[i, j, c1, c2] += im_slice.dot(del_slice)
+            return output
+        else:
+            for n in range(N):
+                for c2 in range(delta.shape[3]):
+                    for c1 in range(images.shape[3]):
+                        for i in range(output.shape[0]):
+                            for j in range(output.shape[1]):
+                                del_sr = max(int(np.ceil((padding - i) / stride)), 0)
+                                del_sc = max(int(np.ceil((padding - j) / stride)), 0)
+                                row_buf = max(i - padding, 0)
+                                col_buf = max(j - padding, 0)
+                                im_sr = del_sr + row_buf
+                                im_sc = del_sc + col_buf
+                                for ii in range(delta.shape[1] - del_sr):
+                                    for jj in range(delta.shape[2] - del_sc):
+                                        output[i, j, c1, c2] += delta[n, del_sr + ii, del_sc + jj, c2] * \
+                                                                images[n, im_sr + (stride * ii),
+                                                                       im_sc + (stride * jj), c1]
             return output
 
 
