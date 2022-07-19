@@ -122,7 +122,7 @@ def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding:
                     ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c2].flatten()
                     output[i, j, c2] = im_slice.dot(ker_slice)
         return output
-    
+
 
 def backward_convolution_kernel(images: np.ndarray, delta: np.ndarray, out_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> np.ndarray:
     '''
@@ -297,7 +297,7 @@ def max_pool(images: np.ndarray, filter_size:
                     pos = np.argmax(image_slice.flatten())
                     grad_i = pos // k2
                     grad_j = pos % k2
-                    grad[n, (stride * i) + grad_i, (stride * j) + grad_j, c] = slice_max
+                    grad[n, (stride * i) + grad_i, (stride * j) + grad_j, c] = 1
 
     if return_grad:
         return output, grad
