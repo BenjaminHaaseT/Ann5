@@ -256,5 +256,5 @@ model = ann5.NeuralNetwork(
         ann5.ReLU(),
         ann5.LinearLayer(128, 1)
     ],
-    objective=ann5.MSE()
+    objective=ann5.MeanSquaredError()
 )

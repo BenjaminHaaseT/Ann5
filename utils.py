@@ -127,11 +127,13 @@ def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding:
 def backward_convolution_kernel(images: np.ndarray, delta: np.ndarray, out_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> np.ndarray:
     '''
     Perform the necessary convolution during backpropagation. Returns the gradient with respect to the kernel.
-    :param images: 
-    :param delta: 
-    :param stride: 
-    :param padding: 
-    :return: 
+
+    :param images: The batch of `images` needed to find the gradient of the loss with respect to the kernel.
+    :param delta: The gradient received from the next layer.
+    :param stride: Controls how many steps we shift the kernel across the image.
+    :param padding: How many zeros are padded around the edges of the image. At this time padding is applied evenly
+                    along all spatial dimensions of the images.
+    :return: An np.ndarray that is the gradient of the with respect to the kernel
     '''
     output = np.zeros(shape=out_shape)
     N = images.shape[0]
@@ -200,6 +202,106 @@ def backward_convolution_kernel(images: np.ndarray, delta: np.ndarray, out_shape
                                                                 images[n, im_sr + (stride * ii),
                                                                        im_sc + (stride * jj), c1]
             return output
+
+
+def backward_convolution_inputs(kernel: np.ndarray,
+                                delta: np.ndarray,
+                                out_shape: Tuple[int, ...],
+                                stride: int = 1,
+                                padding: int = 0) -> np.ndarray:
+    """
+    Perform convolution during backpropagation update the delta term from
+    the gradient with respect to inputs at current layer.
+    :param kernel: The kernel of the current layer
+    :param delta: The gradient received from the next layer
+    :param out_shape: The desired shape of our output
+    :param stride: Controls how many units we shift the kernel over during forward propagation,
+                   will be the same value passed in as a parameter.
+    :param padding: Controls the padding around the spatial dimensions of the image,
+                    is applied evenly to all spatial dimensions of the image.
+    :return: The gradient with respect to the inputs for further backpropagation
+    """
+    output = np.zeros(shape=out_shape)
+    N = output.shape[0]
+    if stride == 1:
+        for n in range(N):
+            for c1 in range(kernel.shape[2]):
+                for c2 in range(kernel.shape[3]):
+                    for i in range(output.shape[1]):
+                        for j in range(output.shape[2]):
+                            # Get indices for kernel
+                            start_row_k = max(padding - i, 0)
+                            stop_row_k = min(delta.shape[1] - i + padding, kernel.shape[0])
+                            start_col_k = max(padding - j, 0)
+                            stop_col_k = min(delta.shape[2] - j + padding, kernel.shape[1])
+                            # Get indices for image slice
+                            start_row_im = max(i - padding, 0)
+                            stop_row_im = min(i - padding + kernel.shape[0], delta.shape[1])
+                            start_col_im = max(j - padding, 0)
+                            stop_col_im = min(j - padding + kernel.shape[1], delta.shape[2])
+                            # Get slices to take advantage of dot product
+                            delta_slice = delta[n, start_row_im: stop_row_im, start_col_im: stop_col_im, c2].flatten()
+                            kernel_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, c1, c2].flatten()
+                            output[n, i, j, c1] += delta_slice.dot(kernel_slice)
+        return output
+    else:
+        if padding == 0:
+            for n in range(N):
+                for c1 in range(kernel.shape[2]):
+                    for c2 in range(kernel.shape[3]):
+                        for i in range(delta.shape[1]):
+                            for j in range(delta.shape[2]):
+                                for ii in range(kernel.shape[0]):
+                                    for jj in range(kernel.shape[1]):
+                                        output[n, (stride * i) + ii, (stride * j) + jj, c1] += delta[n, i, j, c2] * \
+                                                                                               kernel[ii, jj, c1, c2]
+            return output
+        else:
+            for n in range(N):
+                for c1 in range(kernel.shape[2]):
+                    for c2 in range(kernel.shape[3]):
+                        for i in range(output.shape[1]):
+                            for j in range(output.shape[2]):
+                                delta_start_row = int(np.floor((i + padding - kernel.shape[0]) / stride) + 1)
+                                delta_start_col = int(np.floor((j + padding - kernel.shape[1]) / stride) + 1)
+                                delta_stop_row = min(int(np.floor(((i + padding) / stride) + 1)), delta.shape[1])
+                                delta_stop_col = min(int(np.floor(((j + padding) / stride) + 1)), delta.shape[2])
+                                for ii in range(delta_start_row, delta_stop_row):
+                                    for jj in range(delta_start_col, delta_stop_col):
+                                        ker_i = i - (stride * ii - padding)
+                                        ker_j = j - (stride * jj - padding)
+                                        output[n, i, j, c1] += delta[n, ii, jj, c2] * kernel[ker_i, ker_j, c1, c2]
+            return output
+
+
+def max_pool(images: np.ndarray, filter_size:
+             Tuple[int, int] = (2, 2),
+             stride: int = 2,
+             return_grad=True) -> Tuple[np.ndarray, ...]:
+
+    k1, k2 = filter_size
+    output_dim0 = images.shape[0]
+    output_dim1 = ((images.shape[1] - k1) // stride) + 1
+    output_dim2 = ((images.shape[2] - k2) // stride) + 1
+    output_dim3 = images.shape[3]
+    output = np.zeros(shape=(output_dim0, output_dim1, output_dim2, output_dim3))
+    grad = np.zeros(shape=images.shape)
+    for n in range(output_dim0):
+        for c in range(output_dim3):
+            for i in range(output_dim1):
+                for j in range(output_dim2):
+                    image_slice = images[n, (stride * i): (stride * i) + k1, (stride * j): (stride * j) + k2, c]
+                    slice_max = np.max(image_slice)
+                    output[n, i, j, c] = slice_max
+                    # Find argmax of value to update gradient as well
+                    pos = np.argmax(image_slice.flatten())
+                    grad_i = pos // k2
+                    grad_j = pos % k2
+                    grad[n, (stride * i) + grad_i, (stride * j) + grad_j, c] = slice_max
+
+    if return_grad:
+        return output, grad
+    return output
 
 
 def get_spirals():
