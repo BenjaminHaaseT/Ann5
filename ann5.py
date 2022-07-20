@@ -177,6 +177,66 @@ class BatchNormalization(ParameterModule):
         return self.parameters
 
 
+class Pooling(DifferentiableModule):
+    """Base class for pooling layers"""
+    def __init__(self, filter_size: Tuple[int, int] = (2, 2), stride: int = 2):
+        super().__init__()
+        self.k1, self.k2 = filter_size
+        self.stride = stride
+        self.gradient = None
+
+
+class MaxPooling(Pooling):
+    """Performs max pooling, is differentiable so it can update delta term"""
+    def __init__(self, filter_size: Tuple[int, int] = (2, 2), stride: int = 2):
+        super().__init__(filter_size, stride)
+
+    def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
+        if is_training:
+            output, self.gradient = ut.max_pool(
+                forward_input,
+                filter_size=(self.k1, self.k2),
+                stride=self.stride,
+                return_grad=True
+            )
+            return output
+        return ut.max_pool(
+            forward_input,
+            filter_size=(self.k1, self.k2),
+            stride=self.stride,
+            return_grad=False
+        )
+
+    def update_delta(self, delta: np.ndarray) -> np.ndarray:
+        '''Assumes we have computed gradient during forward pass for current epoch'''
+        return ut.pool_backward(self.gradient, delta, filter_size=(self.k1, self.k2), stride=self.stride)
+
+
+class AveragePooling(Pooling):
+    """Performs average pooling, is differentiable so it can update delta term"""
+    def __init__(self, filter_size: Tuple[int, int] = (2, 2), stride: int = 2):
+        super().__init__(filter_size, stride)
+
+    def forward(self, forward_input: np.ndarray, is_training=True):
+        if is_training:
+            output, self.gradient = ut.average_pool(
+                forward_input,
+                filter_size=(self.k1, self.k2),
+                stride=self.stride,
+                return_grad=True
+            )
+            return output
+        return ut.average_pool(
+            forward_input,
+            filter_size=(self.k1, self.k2),
+            stride=self.stride,
+            return_grad=False
+        )
+
+    def update_delta(self, delta: np.ndarray) -> np.ndarray:
+        return ut.pool_backward(self.gradient, delta, filter_size=(self.k1, self.k2), stride=self.stride)
+
+
 class ActivationFunction(DifferentiableModule):
     '''Wrapper class for an activation function'''
     def __init__(self, activation_function: str):
@@ -231,7 +291,7 @@ class LeakyReLU(ActivationFunction):
 
 class FinalActivationFunction(BaseModule):
     '''Base class for any final activation function, not differentiable
-    because gradient w.r.t final activation function will be computed in objective function'''
+    because gradient with respect to the final activation function will be computed in objective function'''
     def __init__(self):
         super().__init__()
 

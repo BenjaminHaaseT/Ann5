@@ -78,14 +78,14 @@ def mse(targets: np.ndarray, activations: np.ndarray) -> float:
 
 def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding: int = 0) -> np.ndarray:
     '''
-    Performs convolution with `image` and `kernel` where `image is a 3D tensor and `kernel` is a 4D tensor, r
-    esulting in a 3D tensor. Each 2D slice of the output will be one feature map of `image`.
-    
-    :param image:
-    :param kernel:
-    :param stride:
-    :param padding:
-    :return:
+    Performs convolution with `image` and `kernel` where `image is a 3D tensor and `kernel` is a 4D tensor,
+    resulting in a 3D tensor. Each 2D slice of the output will be one feature map of `image`.
+    Currently padding is applied evenly to all spatial dimensions.
+    :param image: The tensor which represents the image
+    :param kernel: The tensor we will convolve the image with
+    :param stride: How many units the filter will shift over 'image' spatial dimensions
+    :param padding: How many zeros will get placed around the spatial dimensions of `image`
+    :return: The result of convolving `image` with `kernel`.
     '''
     # Compute dimensions for the output
     output_dim1 = ((image.shape[1] + 2 * padding - kernel.shape[0]) // stride) + 1
@@ -274,11 +274,18 @@ def backward_convolution_inputs(kernel: np.ndarray,
             return output
 
 
-def max_pool(images: np.ndarray, filter_size:
-             Tuple[int, int] = (2, 2),
-             stride: int = 2,
-             return_grad=True) -> Tuple[np.ndarray, ...]:
-
+def max_pool(images: np.ndarray, filter_size: Tuple[int, int] = (2, 2),
+             stride: int = 2, return_grad=True) -> Tuple[np.ndarray, ...]:
+    """
+    Performs max pooling. Computes the gradient simultaneously while computing the output for efficiency.
+    Option to return the gradient is selected by `return_grad` parameter.
+    :param images: Images to perform max pooling on.
+    :param filter_size: Size of the filter, determines how many elements of each image
+                        will be considered for each max pooling operation.
+    :param stride: How many pixels we slide the filter on each iteration
+    :param return_grad: Boolean flag, if True the gradient will be returned for ease of backpropagation.
+    :return: The result of max pooling the images and the gradient if `return_grad` is set to True.
+    """
     k1, k2 = filter_size
     output_dim0 = images.shape[0]
     output_dim1 = ((images.shape[1] - k1) // stride) + 1
@@ -302,6 +309,56 @@ def max_pool(images: np.ndarray, filter_size:
     if return_grad:
         return output, grad
     return output
+
+
+def average_pool(images: np.ndarray, filter_size: Tuple[int, int] = (2, 2),
+                 stride: int = 2, return_grad=True) -> Tuple[np.ndarray, ...]:
+    """
+    Performs average pooling. Computes the gradient simultaneously while computing the output for efficiency.
+    Option to return the gradient is selected by `return_grad` parameter.
+    :param images: Images to perform max pooling on.
+    :param filter_size: Size of the filter, determines how many elements of each image
+                        will be considered for each max pooling operation.
+    :param stride: How many pixels we slide the filter on each iteration
+    :param return_grad: Boolean flag, if True the gradient will be returned for ease of backpropagation.
+    :return: The result of average pooling the images and the gradient if `return_grad` is set to True.
+    """
+    k1, k2 = filter_size
+    output_dim0 = images.shape[0]
+    output_dim1 = ((images.shape[1] - k1) // stride) + 1
+    output_dim2 = ((images.shape[2] - k2) // stride) + 1
+    output_dim3 = images.shape[3]
+    output = np.zeros(shape=(output_dim0, output_dim1, output_dim2, output_dim3))
+    grad = np.ones_like(images) / (k1 * k2)
+    for n in range(output_dim0):
+        for c in range(output_dim3):
+            for i in range(output_dim1):
+                for j in range(output_dim2):
+                    image_slice = images[n, (stride * i): (stride * i) + k1, (stride * j): (stride * j) + k2, c]
+                    output[n, i, j, c] = np.mean(image_slice)
+    if return_grad:
+        return output, grad
+    return output
+
+
+def pool_backward(grad: np.ndarray, delta: np.ndarray, filter_size: Tuple[int, int] = (2, 2), stride: int = 2) -> np.ndarray:
+    """
+    Computes the gradient at the pooling layer, is general enough to be used for max pooling or average pooling.
+    Assumes that the gradient with respect to the max pooling function has already been computed and
+    performs the operation to update the delta term for further backpropagation.
+    :param grad:
+    :param delta:
+    :param filter_size:
+    :param stride:
+    :return:
+    """
+    k1, k2 = filter_size
+    for n in range(delta.shape[0]):
+        for c in range(delta.shape[3]):
+            for i in range(delta.shape[1]):
+                for j in range(delta.shape[2]):
+                    grad[n, (stride * i): (stride * i) + k1, (stride * j): (stride * j) + k2, c] *= delta[n, i, j, c]
+    return grad
 
 
 def get_spirals():
