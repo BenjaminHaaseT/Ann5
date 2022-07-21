@@ -124,6 +124,23 @@ def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding:
         return output
 
 
+def convolution_generator(images: np.ndarray, kernel: np.ndarray, stride: int = 1, padding: int = 0) -> np.ndarray:
+    for n in range(images.shape[0]):
+        yield convolution(images[n], kernel, stride=stride, padding=padding)
+
+
+def compute_backward_padding(in_shape: int, out_shape: int, filter_shape: int, stride: int) -> int:
+    """
+    Computes padding needed for backpropagation. Works in every case except when stride > 1 and padding > 0
+    during forward propagation, That case needs to be handled separately.
+    :param in_shape: The length of the input shape during forward propagation
+    :param out_shape: The length of the output shape during forward propagation
+    :param stride: Stride used during forward propagation.
+    :return: An `int` representing the padding needed for backpropagation
+    """
+    return (stride * in_shape + filter_shape - out_shape - stride) // 2
+
+
 def backward_convolution_kernel(images: np.ndarray, delta: np.ndarray, out_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> np.ndarray:
     '''
     Perform the necessary convolution during backpropagation. Returns the gradient with respect to the kernel.

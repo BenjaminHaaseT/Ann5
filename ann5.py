@@ -32,7 +32,7 @@ class BaseModule(object):
     def __init__(self):
         pass
 
-    def forward(self, forward_input: np.ndarray, is_training=True):
+    def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
         pass
 
 
@@ -177,6 +177,87 @@ class BatchNormalization(ParameterModule):
         return self.parameters
 
 
+class Conv2d(ParameterModule):
+    """For convolution with 2 spatial dimensions"""
+    def __init__(self, channels_in: int, channels_out: int,
+                 kernel_size: Tuple[int, int], stride: int = 1, padding: int = 0, bias=True):
+        super().__init__()
+        self.k1, self.k2 = kernel_size
+        k = np.sqrt(1 / (channels_in * self.k1 * self.k2))
+        self.weights = np.random.uniform(-k, k, size=(self.k1, self.k2, channels_in, channels_out))
+        if bias:
+            self.bias_flag = True
+            self.bias = np.random.uniform(-k, k, channels_out)
+            self.parameters = [self.weights, self.bias]
+        else:
+            self.bias_flag = False
+            self.parameters = [self.weights]
+        self.stride = stride
+        self.padding = padding
+        self.input_ = None
+
+    def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
+        if is_training:
+            self.input_ = forward_input
+        if self.bias_flag:
+            output = [
+                conv + self.bias for conv in ut.convolution_generator(
+                    forward_input,
+                    self.weights,
+                    stride=self.stride,
+                    padding=self.padding
+                )
+            ]
+        else:
+            output = [
+                conv for conv in ut.convolution_generator(
+                    forward_input,
+                    self.weights,
+                    stride=self.stride,
+                    padding=self.padding
+                )
+            ]
+        return np.array(output)
+
+    def get_gradients(self, delta: np.ndarray, reg: float) -> List[np.ndarray]:
+        if self.stride > 1 and self.padding > 0:
+            backward_padding = self.padding
+        else:
+            backward_padding = ut.compute_backward_padding(
+                in_shape=self.input_.shape[1],
+                out_shape=delta.shape[1],
+                filter_shape=self.k1,
+                stride=self.stride
+            )
+        grad_w = ut.backward_convolution_kernel(
+            images=self.input_,
+            delta=delta,
+            out_shape=(self.k1, self.k2),
+            stride=self.stride,
+            padding=backward_padding
+        )
+        if self.bias_flag:
+            grad_b = np.sum(delta, axis=(0, 1, 2))
+            return [grad_w, grad_b]
+        return [grad_w]
+
+    def update_delta(self, delta: np.ndarray) -> np.ndarray:
+        if self.stride == 1:
+            backward_padding = self.k1 - self.padding - 1
+        else:
+            backward_padding = self.padding
+        return ut.backward_convolution_inputs(
+            kernel=self.weights,
+            delta=delta,
+            out_shape=self.input_.shape,
+            stride=self.stride,
+            padding=backward_padding
+        )
+
+    def params(self) -> List[np.ndarray]:
+        return self.parameters
+
+
 class Pooling(DifferentiableModule):
     """Base class for pooling layers"""
     def __init__(self, filter_size: Tuple[int, int] = (2, 2), stride: int = 2):
@@ -290,8 +371,8 @@ class LeakyReLU(ActivationFunction):
 
 
 class FinalActivationFunction(BaseModule):
-    '''Base class for any final activation function, not differentiable
-    because gradient with respect to the final activation function will be computed in objective function'''
+    '''Base class for any final activation function, not differentiable,
+    because the gradient with respect to the final activation function will be computed in objective function'''
     def __init__(self):
         super().__init__()
 
@@ -476,7 +557,7 @@ class VanillaOptimizer(Optimizer):
             if isinstance(layers[i], ParameterModule):
                 self.perform_parameter_updates(layers[i], delta, lr, reg)
 
-            # If differentiable, udpate delta term
+            # If differentiable, update delta term
             if isinstance(layers[i], DifferentiableModule):
                 delta = layers[i].update_delta(delta)
 
