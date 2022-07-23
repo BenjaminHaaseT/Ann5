@@ -202,8 +202,8 @@ class Conv2d(ParameterModule):
         if self.bias_flag:
             output = [
                 conv + self.bias for conv in ut.convolution_generator(
-                    forward_input,
-                    self.weights,
+                    images=forward_input,
+                    kernel=self.weights,
                     stride=self.stride,
                     padding=self.padding
                 )
@@ -211,8 +211,8 @@ class Conv2d(ParameterModule):
         else:
             output = [
                 conv for conv in ut.convolution_generator(
-                    forward_input,
-                    self.weights,
+                    images=forward_input,
+                    kernel=self.weights,
                     stride=self.stride,
                     padding=self.padding
                 )
@@ -526,12 +526,49 @@ class Optimizer(object):
     def set_up(self) -> None:
         pass
 
-    def optimize(self, delta: np.ndarray, reg: float):
+    def perform_parameter_updates(self, layer: ParameterModule, delta: np.ndarray, reg: float) -> None:
+        pass
+
+    def optimize(self, delta: np.ndarray, reg: float = 0) -> None:
         pass
 
 
+class CachedOptimizer(Optimizer):
+    '''Base class for all optimizers that need to update a `cache` of some kind during gradient descent'''
+    def __init__(self, layers: List[BaseModule], lr: float = 10e-3):
+        super().__init__(layers, lr)
+
+    def perform_parameter_updates(self, layer: ParameterModule, layer_index: int, delta: np.ndarray, reg: float) -> None:
+        pass
+
+    def optimize(self, delta: np.ndarray, reg: float = 0) -> None:
+        # Perform backpropagation
+        for i in range(len(self.layers) - 1, 0, -1):
+            # If parameter module update parameters
+            if isinstance(self.layers[i], ParameterModule):
+                self.perform_parameter_updates(
+                    layer=self.layers[i],
+                    layer_index=i,
+                    delta=delta,
+                    reg=reg
+                )
+
+            # If differentiable module update delta term accordingly
+            if isinstance(self.layers[i], DifferentiableModule):
+                delta = self.layers[i].update_delta(delta)
+
+        # Finally update input layer if necessary
+        if isinstance(self.layers[0], ParameterModule):
+            self.perform_parameter_updates(
+                layer=self.layers[0],
+                layer_index=0,
+                delta=delta,
+                reg=reg
+            )
+
+
 class VanillaOptimizer(Optimizer):
-    '''Provides standard "vannilla" gradient decent'''
+    '''Provides standard "vannilla" gradient decent, no momentum and no adaptive learning rate functionality'''
     def __init__(self, layers: List[BaseModule], lr: float = 10e-3):
         super().__init__(layers, lr)
 
@@ -542,7 +579,7 @@ class VanillaOptimizer(Optimizer):
         for j in range(len(parameters)):
             parameters[j] -= self.lr * gradients[j]
 
-    def optimize(self, delta: np.ndarray, reg: float):
+    def optimize(self, delta: np.ndarray, reg: float = 0):
         for i in range(len(self.layers) - 1, 0, -1):
             # Update parameters if necessary
             if isinstance(self.layers[i], ParameterModule):
@@ -557,7 +594,7 @@ class VanillaOptimizer(Optimizer):
             self.perform_parameter_updates(self.layers[0], delta, reg)
 
 
-class MomentumOptimizer(Optimizer):
+class MomentumOptimizer(CachedOptimizer):
     '''Provides gradient descent with momentum'''
     def __init__(self, layers: List[BaseModule], lr: float = 10e-3, momentum: str = 'standard', mu: float = 0.9):
         super().__init__(layers, lr)
@@ -593,34 +630,14 @@ class MomentumOptimizer(Optimizer):
                 mu=self.mu
             )
 
-    def optimize(self, delta: np.ndarray, reg: float):
-        for i in range(len(self.layers) - 1, 0, -1):
-            # If parameter module, update parameters
-            if isinstance(self.layers[i], ParameterModule):
-                self.perform_parameter_updates(
-                    layer=self.layers[i],
-                    layer_index=i,
-                    delta=delta,
-                    reg=reg
-                )
 
-            # if differentiable, update delta term
-            if isinstance(self.layers[i], DifferentiableModule):
-                delta = self.layers[i].update_delta(delta)
-
-        # Finally update input layer if needed
-        if isinstance(self.layers[0], ParameterModule):
-            self.perform_parameter_updates(
-                layer=self.layers[0],
-                layer_index=0,
-                delta=delta,
-                reg=reg
-            )
-
-
-class StandardOptimizer(Optimizer):
+class StandardOptimizer(MomentumOptimizer):
     '''Optimizer that provides both momentum and adaptive learning rate capabilities'''
-    def __init__(self, layers: List[BaseModule], lr_scheduler: LearningRateScheduler, lr: float = 10e-3, momentum: str = "standard", mu: float = 0.9):
+    def __init__(self, layers: List[BaseModule],
+                       lr_scheduler: LearningRateScheduler,
+                       lr: float = 10e-3,
+                       momentum: str = "standard",
+                       mu: float = 0.9):
         super().__init__(layers, lr)
         self.momentum_updater = MOMENTUM_UPDATERS[momentum]
         self.mu = mu
@@ -628,13 +645,7 @@ class StandardOptimizer(Optimizer):
         self.velocities = {}
 
     def set_up(self) -> None:
-        for i in range(len(self.layers)):
-            if isinstance(self.layers[i], ParameterModule):
-                layer_velocity = {}
-                parameters = self.layers[i].params()
-                for j in range(len(parameters)):
-                    layer_velocity[j] = np.zeros_like(parameters[j])
-                self.velocities[i] = layer_velocity
+        super().set_up()
         self.scheduler.set_up(self.layers)
 
     def perform_parameter_updates(self, layer: ParameterModule, layer_index: int, delta: np.ndarray, reg: float) -> None:
@@ -664,33 +675,8 @@ class StandardOptimizer(Optimizer):
                 mu=self.mu
             )
 
-    def optimize(self, delta: np.ndarray, reg: float):
-        # Perform backpropagation
-        for i in range(len(self.layers) - 1, 0, -1):
-            # If parameter module update parameters
-            if isinstance(self.layers[i], ParameterModule):
-                self.perform_parameter_updates(
-                    layer=self.layers[i],
-                    layer_index=i,
-                    delta=delta,
-                    reg=reg
-                )
 
-            # If differentiable module update delta term accordingly
-            if isinstance(self.layers[i], DifferentiableModule):
-                delta = self.layers[i].update_delta(delta)
-
-        # Finally update input layer if necessary
-        if isinstance(self.layers[0], ParameterModule):
-            self.perform_parameter_updates(
-                layer=self.layers[0],
-                layer_index=0,
-                delta=delta,
-                reg=reg
-            )
-
-
-class AdamOptimizer(Optimizer):
+class AdamOptimizer(CachedOptimizer):
     '''Provides ADAM optimization functionality'''
     def __init__(self, layers: List[BaseModule], lr: float = 10e-3, beta_1: float = 0.99, beta_2: float = 0.999, epsilon: float = 10e-8):
         super().__init__(layers, lr)
@@ -737,28 +723,8 @@ class AdamOptimizer(Optimizer):
         for j, estimates in enumerate(unbiased_estimates):
             parameters[j] -= self.lr * (estimates[0] / np.sqrt(estimates[1] + self.epsilon))
 
-    def optimize(self, delta: np.ndarray, reg: float):
-        for i in range(len(self.layers) - 1, 0, -1):
-            if isinstance(self.layers[i], ParameterModule):
-                self.perform_parameter_updates(
-                    layer=self.layers[i],
-                    layer_index=i,
-                    delta=delta,
-                    reg=reg
-                )
-
-            # If differentiable update delta
-            if isinstance(self.layers[i], DifferentiableModule):
-                delta = self.layers[i].update_delta(delta)
-
-        if isinstance(self.layers[0], ParameterModule):
-            self.perform_parameter_updates(
-                layer=self.layers[0],
-                layer_index=0,
-                delta=delta,
-                reg=reg
-            )
-
+    def optimize(self, delta: np.ndarray, reg: float = 0):
+        super().optimize(delta=delta, reg=reg)
         # Update 'self.t'
         self.t += 1
 
@@ -946,17 +912,16 @@ def main():
     )
 
     # scheduler = RMSProp()
-    # optimizer = StandardOptimizer(layers=ann.layers, lr=10e-6, lr_scheduler=scheduler, momentum="nesterov", mu=0.95)
-    optimizer = AdamOptimizer(layers=ann.layers, lr=10e-3)
+    # optimizer = StandardOptimizer(layers=ann.layers, lr=10e-6, lr_scheduler=scheduler, momentum="nesterov", mu=0.96)
+    optimizer = AdamOptimizer(layers=ann.layers, lr=10e-4)
 
-    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-6, batch_size=128, epochs=15, reg=0.,
+    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-6, batch_size=256, epochs=8, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)
     print(f"Final training classification rate: {final_training_classification_rate:.4f}")
     print(f"Final validation classification rate: {final_validation_classification_rate:.4f}")
 
-    # Testing!
 
 if __name__ == '__main__':
     main()
