@@ -35,6 +35,9 @@ class BaseModule(object):
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
         pass
 
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        pass
+
 
 class DifferentiableModule(BaseModule):
     '''Base layer for any class that will contribute to back propagation'''
@@ -78,6 +81,9 @@ class InputLinearLayer(InputLayer):
         else:
             self.parameters = [self.weights]
 
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return (forward_shape[0], self.weights.shape[1])
+
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
             self.input_ = forward_input
@@ -118,6 +124,9 @@ class Dropout(BaseModule):
         super().__init__()
         self.p_keep = p_keep
 
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return forward_shape
+
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
             # Create mask and pass forward
@@ -142,6 +151,9 @@ class BatchNormalization(ParameterModule):
         self.running_var = 0
         self.batch_mean = 0
         self.batch_var = 0
+
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return forward_shape
 
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
@@ -182,9 +194,14 @@ class Conv2d(ParameterModule):
     def __init__(self, channels_in: int, channels_out: int,
                  kernel_size: Tuple[int, int], stride: int = 1, padding: int = 0, bias=True):
         super().__init__()
-        self.k1, self.k2 = kernel_size
-        k = np.sqrt(1 / (channels_in * self.k1 * self.k2))
-        self.weights = np.random.uniform(-k, k, size=(self.k1, self.k2, channels_in, channels_out))
+        self.kernel_size = kernel_size
+        k = np.sqrt(1 / (channels_in * self.kernel_size[0] * self.kernel_size[1]))
+        self.weights = np.random.uniform(
+            -k,
+             k,
+             size=(self.kernel_size[0], self.kernel_size[1], channels_in, channels_out)
+        )
+
         if bias:
             self.bias_flag = True
             self.bias = np.random.uniform(-k, k, channels_out)
@@ -196,12 +213,42 @@ class Conv2d(ParameterModule):
         self.padding = padding
         self.input_ = None
 
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        new_forward_shape = ut.compute_forward_shape(forward_shape, self.kernel_size, self.stride, self.padding)
+        if self.stride > 1 and self.padding > 0:
+            self.backward_padding_kernel = self.padding
+        else:
+            self.backward_padding_kernel = ut.compute_backward_padding(
+                in_shape=forward_shape,
+                out_shape=new_forward_shape,
+                filter_shape=self.kernel_size,
+                stride=self.stride
+            )
+
+        if self.backward_padding_kernel[0] == self.backward_padding_kernel[1]:
+            # We are dealing with square images/filters etc... we only need one value
+            self.backward_padding_kernel = self.backward_padding_kernel[0]
+
+        if self.stride == 1:
+            if self.kernel_size[0] - self.padding - 1 == self.kernel_size[1] - self.padding - 1:
+                # We are dealing with square and only need one value to pass into backward convolution function.
+                self.bacwkard_padding_inputs_ = self.kernel_size[0] - self.padding - 1
+            else:
+                self.backward_padding_inputs_ = (
+                    self.kernel_size[0] - self.padding - 1,
+                    self.kernel_size[1] - self.padding - 1
+                )
+        else:
+            self.backward_padding_inputs_ = self.padding
+
+        return new_forward_shape
+
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
         if is_training:
             self.input_ = forward_input
         if self.bias_flag:
             output = [
-                conv + self.bias for conv in ut.convolution_generator(
+                convolved + self.bias for convolved in ut.convolution_generator(
                     images=forward_input,
                     kernel=self.weights,
                     stride=self.stride,
@@ -210,7 +257,7 @@ class Conv2d(ParameterModule):
             ]
         else:
             output = [
-                conv for conv in ut.convolution_generator(
+                convolved for convolved in ut.convolution_generator(
                     images=forward_input,
                     kernel=self.weights,
                     stride=self.stride,
@@ -220,21 +267,12 @@ class Conv2d(ParameterModule):
         return np.array(output)
 
     def get_gradients(self, delta: np.ndarray, reg: float) -> List[np.ndarray]:
-        if self.stride > 1 and self.padding > 0:
-            backward_padding = self.padding
-        else:
-            backward_padding = ut.compute_backward_padding(
-                in_shape=self.input_.shape[1],
-                out_shape=delta.shape[1],
-                filter_shape=self.k1,
-                stride=self.stride
-            )
         grad_w = ut.backward_convolution_kernel(
             images=self.input_,
             delta=delta,
-            out_shape=(self.k1, self.k2),
+            out_shape=self.kernel_size,
             stride=self.stride,
-            padding=backward_padding
+            padding=self.backward_padding_kernel
         )
         if self.bias_flag:
             grad_b = np.sum(delta, axis=(0, 1, 2))
@@ -242,16 +280,12 @@ class Conv2d(ParameterModule):
         return [grad_w]
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
-        if self.stride == 1:
-            backward_padding = self.k1 - self.padding - 1
-        else:
-            backward_padding = self.padding
         return ut.backward_convolution_inputs(
             kernel=np.fliplr(np.flipud(self.weights)),
             delta=delta,
             out_shape=self.input_.shape,
             stride=self.stride,
-            padding=backward_padding
+            padding=self.backward_padding_inputs_
         )
 
     def params(self) -> List[np.ndarray]:
@@ -262,9 +296,14 @@ class Pooling(DifferentiableModule):
     """Base class for pooling layers"""
     def __init__(self, filter_size: Tuple[int, int] = (2, 2), stride: int = 2):
         super().__init__()
-        self.k1, self.k2 = filter_size
+        self.filter_size = filter_size
         self.stride = stride
         self.gradient = None
+
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        dim_1 = ((forward_shape[0] - self.filter_size[0]) // self.stride) + 1
+        dim_2 = ((forward_shape[1] - self.filter_size[1]) // self.stride) + 1
+        return (dim_1, dim_2)
 
 
 class MaxPooling(Pooling):
@@ -276,21 +315,21 @@ class MaxPooling(Pooling):
         if is_training:
             output, self.gradient = ut.max_pool(
                 forward_input,
-                filter_size=(self.k1, self.k2),
+                filter_size=self.filter_size,
                 stride=self.stride,
                 return_grad=True
             )
             return output
         return ut.max_pool(
             forward_input,
-            filter_size=(self.k1, self.k2),
+            filter_size=self.filter_size,
             stride=self.stride,
             return_grad=False
         )
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
         '''Assumes we have computed gradient during forward pass for current epoch'''
-        return ut.pool_backward(self.gradient, delta, filter_size=(self.k1, self.k2), stride=self.stride)
+        return ut.pool_backward(self.gradient, delta, filter_size=self.filter_size, stride=self.stride)
 
 
 class AveragePooling(Pooling):
@@ -302,20 +341,20 @@ class AveragePooling(Pooling):
         if is_training:
             output, self.gradient = ut.average_pool(
                 forward_input,
-                filter_size=(self.k1, self.k2),
+                filter_size=self.filter_size,
                 stride=self.stride,
                 return_grad=True
             )
             return output
         return ut.average_pool(
             forward_input,
-            filter_size=(self.k1, self.k2),
+            filter_size=self.filter_size,
             stride=self.stride,
             return_grad=False
         )
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
-        return ut.pool_backward(self.gradient, delta, filter_size=(self.k1, self.k2), stride=self.stride)
+        return ut.pool_backward(self.gradient, delta, filter_size=self.filter_size, stride=self.stride)
 
 
 class ActivationFunction(DifferentiableModule):
@@ -325,6 +364,9 @@ class ActivationFunction(DifferentiableModule):
         self.activation_function = ACTIVATION_FUNCTIONS[activation_function]
         self.gradient_function = GRADIENT_FUNCTIONS[activation_function]
         self.activations = None
+
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return forward_shape
 
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
         if is_training:
@@ -375,6 +417,9 @@ class FinalActivationFunction(BaseModule):
     because the gradient with respect to the final activation function will be computed in objective function'''
     def __init__(self):
         super().__init__()
+
+    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return forward_shape
 
 
 class Softmax(FinalActivationFunction):
@@ -466,7 +511,7 @@ class LearningRateScheduler(object):
 
 
 class CachedLearningRateScheduler(LearningRateScheduler):
-    """Base class for all learning rate schedulers that implement a cache for parameters"""
+    """Abstract base class for all learning rate schedulers that implement a cache for parameters"""
     def __init__(self, epsilon=10e-8):
         super().__init__()
         self.epsilon = epsilon
@@ -601,6 +646,7 @@ class MomentumOptimizer(CachedOptimizer):
         self.momentum_updater = MOMENTUM_UPDATERS[momentum]
         self.mu = mu
         self.velocities = {}
+        self.set_up()
 
     def set_up(self) -> None:
         # Set up initial velocities for each layer that has parameters i.e. 'ParameterModule' in 'layers
@@ -643,6 +689,7 @@ class StandardOptimizer(MomentumOptimizer):
         self.mu = mu
         self.scheduler = lr_scheduler
         self.velocities = {}
+        self.set_up()
 
     def set_up(self) -> None:
         super().set_up()
@@ -686,6 +733,7 @@ class AdamOptimizer(CachedOptimizer):
         self.t = 1
         self.first_moments = {}
         self.second_moments = {}
+        self.set_up()
 
     def set_up(self) -> None:
         for i in range(len(self.layers)):
@@ -814,7 +862,7 @@ class NeuralNetwork(object):
 
     def set_up(self, optimizer: Optimizer, batch_size=None):
         print("Setting up neural network...")
-        optimizer.set_up()
+        # optimizer.set_up()
         if batch_size is None:
             self.trainer = FullGDTrainer()
         elif isinstance(batch_size, int) and batch_size > 0:
@@ -915,7 +963,7 @@ def main():
     # optimizer = StandardOptimizer(layers=ann.layers, lr=10e-6, lr_scheduler=scheduler, momentum="nesterov", mu=0.96)
     optimizer = AdamOptimizer(layers=ann.layers, lr=10e-4)
 
-    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-6, batch_size=256, epochs=8, reg=0.,
+    ann.fit(x_train, y_train, optimizer=optimizer, lr=10e-6, batch_size=256, epochs=15, reg=0.,
             validation_data=(x_validate, y_validate), show_fig=True)
     final_training_classification_rate = ann.score(x_train, y_train)
     final_validation_classification_rate = ann.score(x_validate, y_validate)

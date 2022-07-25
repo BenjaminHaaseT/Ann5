@@ -129,16 +129,35 @@ def convolution_generator(images: np.ndarray, kernel: np.ndarray, stride: int = 
         yield convolution(images[n], kernel, stride=stride, padding=padding)
 
 
-def compute_backward_padding(in_shape: int, out_shape: int, filter_shape: int, stride: int) -> int:
+def compute_backward_padding(in_shape: Tuple[int, ...], out_shape: Tuple[int, ...], filter_shape: Tuple[int, ...], stride: int) -> Tuple[int, ...]:
     """
     Computes padding needed for backpropagation. Works in every case except when stride > 1 and padding > 0
-    during forward propagation, That case needs to be handled separately.
+    during forward propagation. That case needs to be handled separately.
     :param in_shape: The length of the input shape during forward propagation
     :param out_shape: The length of the output shape during forward propagation
     :param stride: Stride used during forward propagation.
     :return: An `int` representing the padding needed for backpropagation
+
     """
-    return (stride * in_shape + filter_shape - out_shape - stride) // 2
+    p1 = (stride * in_shape[0] + filter_shape[0] - out_shape[0] - stride) // 2
+    p2 = (stride * in_shape[1] + filter_shape[1] - out_shape[1] - stride) // 2
+    return (p1, p2)
+
+
+def compute_forward_shape(in_shape: Tuple[int, ...], filter_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> Tuple[int, ...]:
+    '''
+    Computes the output shape of forward convolution. Assumes in_shape is a tuple of (N x H x W x C) and
+    filter is a shape of (K1 x K2 x C x D). Returns what the output will be when performing
+    convolution with given `stride` and `padding`.
+    :param in_shape:
+    :param filter_shape:
+    :param stride:
+    :param padding:
+    :return:
+    '''
+    dim_1 = ((in_shape[1] - filter_shape[0] + 2 * padding) // stride) + 1
+    dim_2 = ((in_shape[2] - filter_shape[1] + 2 * padding) // stride) + 1
+    return (dim_1, dim_2)
 
 
 def backward_convolution_kernel(images: np.ndarray, delta: np.ndarray, out_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> np.ndarray:
