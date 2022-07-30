@@ -39,6 +39,49 @@ class BaseModule(object):
         pass
 
 
+class Wrapper(BaseModule):
+    '''Abstract base class for any class that will be a wraper for modules,
+    i.e. a Sequence of modules or a model class'''
+    def __init__(self, layers: List[BaseModule]):
+        super().__init__()
+        self.layers = layers
+        self.set_up_flag = False
+
+    def get_layers(self) -> List[BaseModule]:
+        return self.layers
+
+    def set_up(self, forward_shape: Tuple[int, ...]) -> None:
+        shape = forward_shape
+        for layer in self.layers:
+            shape = layer.set_up(shape)
+        self.set_up_flag = True
+
+    def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
+        if not self.set_up_flag:
+            raise Exception("Sequential has not been setup, please call `set_up()` before calling `forward()`")
+        input_ = forward_input
+        for layer in self.layers:
+            input_ = layer.forward(input_, is_training)
+        return input_
+
+
+class Sequential(Wrapper):
+    '''Class for a sequence of modules, mimics pytorch sequential object'''
+    def __init__(self, layers: List[BaseModule]):
+        super().__init__(layers)
+        self.train_flag = True
+
+    def train(self) -> None:
+        self.train_flag = True
+
+    def evaluate(self) -> None:
+        self.train_flag = False
+
+    def __call__(self, *args, **kwargs):
+        x = args[0]
+        return self.forward(x, self.train_flag)
+
+
 class DifferentiableModule(BaseModule):
     '''Base layer for any class that will contribute to back propagation'''
     def __init__(self):
@@ -196,12 +239,9 @@ class Conv2d(ParameterModule):
         super().__init__()
         self.kernel_size = kernel_size
         k = np.sqrt(1 / (channels_in * self.kernel_size[0] * self.kernel_size[1]))
-        self.weights = np.random.uniform(
-            -k,
-             k,
-             size=(self.kernel_size[0], self.kernel_size[1], channels_in, channels_out)
-        )
-
+        self.weights = np.random.uniform(-k, k, size=(self.kernel_size[0],
+                                                      self.kernel_size[1],
+                                                      channels_in, channels_out))
         if bias:
             self.bias_flag = True
             self.bias = np.random.uniform(-k, k, channels_out)
@@ -215,7 +255,7 @@ class Conv2d(ParameterModule):
 
     def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
         new_forward_shape = ut.compute_forward_shape(forward_shape, self.kernel_size, self.stride, self.padding)
-        if self.stride > 1 and self.padding > 0:
+        if self.stride > 1:
             self.backward_padding_kernel = self.padding
         else:
             self.backward_padding_kernel = ut.compute_backward_padding(
@@ -224,20 +264,8 @@ class Conv2d(ParameterModule):
                 filter_shape=self.kernel_size,
                 stride=self.stride
             )
-
-        if self.backward_padding_kernel[0] == self.backward_padding_kernel[1]:
-            # We are dealing with square images/filters etc... we only need one value
-            self.backward_padding_kernel = self.backward_padding_kernel[0]
-
         if self.stride == 1:
-            if self.kernel_size[0] - self.padding - 1 == self.kernel_size[1] - self.padding - 1:
-                # We are dealing with square and only need one value to pass into backward convolution function.
-                self.bacwkard_padding_inputs_ = self.kernel_size[0] - self.padding - 1
-            else:
-                self.backward_padding_inputs_ = (
-                    self.kernel_size[0] - self.padding - 1,
-                    self.kernel_size[1] - self.padding - 1
-                )
+            self.bacwkard_padding_inputs_ = self.kernel_size[0] - self.padding - 1
         else:
             self.backward_padding_inputs_ = self.padding
 
@@ -281,7 +309,7 @@ class Conv2d(ParameterModule):
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
         return ut.backward_convolution_inputs(
-            kernel=np.fliplr(np.flipud(self.weights)),
+            kernel=self.weights,
             delta=delta,
             out_shape=self.input_.shape,
             stride=self.stride,
@@ -819,7 +847,9 @@ class MiniBatchTrainer(Trainer):
         self.batch_size = batch_size
 
     def train(self, x_train: np.ndarray, y_train: np.ndarray, x_validate: np.ndarray, y_validate: np.ndarray,
-              layers: List[BaseModule], optimizer: Optimizer, forward_function: Callable, objective_function: ObjectiveFunction, lr: float, reg: float) -> Tuple[float, float]:
+              layers: List[BaseModule], optimizer: Optimizer, forward_function: Callable,
+              objective_function: ObjectiveFunction, lr: float, reg: float) -> Tuple[float, float]:
+
         # Shuffle data first
         x_train, y_train = shuffle(x_train, y_train)
 
@@ -854,13 +884,88 @@ class MiniBatchTrainer(Trainer):
         return total_training_loss / n_batches, validation_loss
 
 
+class Model(Sequential):
+    """Class for a full model, takes in a list of layers and an objective function"""
+    def __init__(self, layers: List[BaseModule], objective: ObjectiveFunction):
+        super().__init__(layers)
+        self.objective_function = objective
+
+    def set_up(self, forward_shape: Tuple[int, ...], batch_size: int = 0) -> None:
+        print("Setting up neural model...")
+        super().set_up(forward_shape=forward_shape)
+        if batch_size == 0:
+            self.trainer = FullGDTrainer()
+        elif isinstance(batch_size, int) and batch_size > 0:
+            self.trainer = MiniBatchTrainer(batch_size=batch_size)
+        else:
+            raise ValueError("Invalid batch_size, please enter a non negative integer.")
+        print("Set up complete.")
+
+    def predict(self, forward_input: np.ndarray) -> np.ndarray:
+        return self.forward(forward_input, is_training=False)
+
+    def fit(self, x_train: np.ndarray, y_train: np.ndarray, optimizer: Optimizer,
+            lr=10e-6, epochs=10000, reg=0.0, validation_prop=0.33,
+            validation_data=None, batch_size=None, show_fig=False):
+        # Set up trainer
+        self.set_up(batch_size)
+        # Split train and test data if necessary
+        if validation_data is None:
+            # Shuffle data
+            x_train, y_train = shuffle(x_train, y_train)
+            # Split data into train and test sets
+            validation_index = int(len(x_train) * validation_prop)
+            x_train, x_validate = x_train[:-validation_index, :], x_train[-validation_index:, :]
+            y_train, y_validate = y_train[:-validation_index], y_train[-validation_index:]
+        else:
+            x_validate, y_validate = validation_data[0], validation_data[1]
+
+        # Save these
+        training_losses = []
+        validation_losses = []
+
+        for epoch in range(epochs):
+
+            # Compute forward pass and perform gradient descent, obtain training loss and validation loss
+            training_loss, validation_loss = self.trainer.train(
+                x_train=x_train,
+                y_train=y_train,
+                x_validate=x_validate,
+                y_validate=y_validate,
+                layers=self.layers,
+                optimizer=optimizer,
+                forward_function=self.forward,
+                objective_function=self.objective_function,
+                lr=lr,
+                reg=reg
+            )
+
+            # Save these
+            training_losses.append(training_loss)
+            validation_losses.append(validation_loss)
+
+            # Display every 'n' epochs
+            if epoch % 1 == 0:
+                print(f'epoch {epoch}')
+                print(f'Training Loss: {training_loss:.4f}')
+                print(f'Validation Loss: {validation_loss:.4f}')
+
+        # Display loss
+        if show_fig:
+            plt.title('Loss Per Epoch')
+            plt.plot(validation_losses, color='red', label='Validation Loss Per Epoch')
+            plt.plot(training_losses, color='blue', label='Training Loss Per Epoch')
+            plt.legend()
+            plt.show()
+
+
 class NeuralNetwork(object):
     '''Base class for a simple feed forward neural net'''
     def __init__(self, layers: List[BaseModule], objective: ObjectiveFunction):
         self.layers = layers
         self.objective_function = objective
 
-    def set_up(self, optimizer: Optimizer, batch_size=None):
+    def set_up(self, batch_size=None):
         print("Setting up neural network...")
         # optimizer.set_up()
         if batch_size is None:
@@ -880,7 +985,7 @@ class NeuralNetwork(object):
     def fit(self, x_train: np.ndarray, y_train: np.ndarray, optimizer: Optimizer,
             lr=10e-6, epochs=10000, reg=0.0, validation_prop=0.33, validation_data=None, batch_size=None, show_fig=False):
         # Set up
-        self.set_up(optimizer, batch_size)
+        self.set_up(batch_size)
 
         if validation_data is None:
             # Shuffle data

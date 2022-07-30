@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import Tuple, Any
 import matplotlib.pyplot as plt
+from sklearn.utils import shuffle
 
 
 def sigmoid(a: np.ndarray) -> np.ndarray:
@@ -129,7 +130,7 @@ def convolution_generator(images: np.ndarray, kernel: np.ndarray, stride: int = 
         yield convolution(images[n], kernel, stride=stride, padding=padding)
 
 
-def compute_backward_padding(in_shape: Tuple[int, ...], out_shape: Tuple[int, ...], filter_shape: Tuple[int, ...], stride: int) -> Tuple[int, ...]:
+def compute_backward_padding(in_shape: Tuple[int, ...], out_shape: Tuple[int, ...], filter_shape: Tuple[int, ...], stride: int) -> int:
     """
     Computes padding needed for backpropagation. Works in every case except when stride > 1 and padding > 0
     during forward propagation. That case needs to be handled separately.
@@ -140,8 +141,8 @@ def compute_backward_padding(in_shape: Tuple[int, ...], out_shape: Tuple[int, ..
 
     """
     p1 = (stride * in_shape[0] + filter_shape[0] - out_shape[0] - stride) // 2
-    p2 = (stride * in_shape[1] + filter_shape[1] - out_shape[1] - stride) // 2
-    return (p1, p2)
+    # p2 = (stride * in_shape[1] + filter_shape[1] - out_shape[1] - stride) // 2
+    return p1
 
 
 def compute_forward_shape(in_shape: Tuple[int, ...], filter_shape: Tuple[int, ...], stride: int = 1, padding: int = 0) -> Tuple[int, ...]:
@@ -260,6 +261,7 @@ def backward_convolution_inputs(kernel: np.ndarray,
     output = np.zeros(shape=out_shape)
     N = output.shape[0]
     if stride == 1:
+        kernel = np.fliplr(np.flipud(kernel))
         for n in range(N):
             for c1 in range(kernel.shape[2]):
                 for c2 in range(kernel.shape[3]):
@@ -397,6 +399,9 @@ def pool_backward(grad: np.ndarray, delta: np.ndarray, filter_size: Tuple[int, i
     return grad
 
 
+
+
+
 def get_spirals():
     '''Get spirals for testing classification'''
     radius = np.linspace(1, 10, 100)
@@ -474,6 +479,31 @@ def get_mnist(normalize=True):
     print("Successfully read in data")
     return X_train, X_validate, Y_train.astype(np.int32), Y_validate.astype(np.int32)
 
+
+class BatchLoader(object):
+    """Simple class for training with batches, meant for supervised learning."""
+    def __init__(self, data: np.ndarray, targets: np.ndarray, batch_size: int, shuffle: bool = True):
+        self.data = data
+        self.targets = targets
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.n_batches = int(np.ceil(len(data) / self.batch_size))
+        self.index = 0
+
+    def __iter__(self):
+        if self.shuffle:
+            self.data, self.targets = shuffle(self.data, self.targets)
+        self.index = 0
+        return self
+
+    def __next__(self):
+        start = self.index * self.batch_size
+        stop = min((self.index + 1) * self.batch_size, len(self.data))
+        if self.index == self.n_batches:
+            raise StopIteration
+        else:
+            self.index += 1
+            return self.data[start:stop], self.targets[start:stop]
 
 
 
