@@ -21,6 +21,7 @@ GRADIENT_FUNCTIONS = {
     'leakyrelu': ut.leaky_relu_grad,
 }
 
+
 MOMENTUM_UPDATERS = {
     'standard': (lambda velocity, differential, mu: velocity),
     'nesterov': (lambda velocity, differential, mu: (mu * velocity) - differential)
@@ -35,9 +36,6 @@ class BaseModule(object):
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
         pass
 
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        pass
-
 
 class Wrapper(BaseModule):
     '''Abstract base class for any class that will be a wraper for modules,
@@ -45,20 +43,11 @@ class Wrapper(BaseModule):
     def __init__(self, layers: List[BaseModule]):
         super().__init__()
         self.layers = layers
-        self.set_up_flag = False
 
     def get_layers(self) -> List[BaseModule]:
         return self.layers
 
-    def set_up(self, forward_shape: Tuple[int, ...]) -> None:
-        shape = forward_shape
-        for layer in self.layers:
-            shape = layer.set_up(shape)
-        self.set_up_flag = True
-
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
-        if not self.set_up_flag:
-            raise Exception("Sequential has not been setup, please call `set_up()` before calling `forward()`")
         input_ = forward_input
         for layer in self.layers:
             input_ = layer.forward(input_, is_training)
@@ -67,8 +56,8 @@ class Wrapper(BaseModule):
 
 class Sequential(Wrapper):
     '''Class for a sequence of modules, mimics pytorch sequential object'''
-    def __init__(self, layers: List[BaseModule]):
-        super().__init__(layers)
+    def __init__(self, *layers: BaseModule):
+        super().__init__(list(layers))
         self.train_flag = True
 
     def train(self) -> None:
@@ -77,8 +66,7 @@ class Sequential(Wrapper):
     def evaluate(self) -> None:
         self.train_flag = False
 
-    def __call__(self, *args, **kwargs):
-        x = args[0]
+    def __call__(self, x: np.ndarray) -> np.ndarray:
         return self.forward(x, self.train_flag)
 
 
@@ -124,9 +112,6 @@ class InputLinearLayer(InputLayer):
         else:
             self.parameters = [self.weights]
 
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        return (forward_shape[0], self.weights.shape[1])
-
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
             self.input_ = forward_input
@@ -167,9 +152,6 @@ class Dropout(BaseModule):
         super().__init__()
         self.p_keep = p_keep
 
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        return forward_shape
-
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
             # Create mask and pass forward
@@ -194,9 +176,6 @@ class BatchNormalization(ParameterModule):
         self.running_var = 0
         self.batch_mean = 0
         self.batch_var = 0
-
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        return forward_shape
 
     def forward(self, forward_input: np.ndarray, is_training=True):
         if is_training:
@@ -251,29 +230,10 @@ class Conv2d(ParameterModule):
             self.parameters = [self.weights]
         self.stride = stride
         self.padding = padding
-        self.input_ = None
-
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        new_forward_shape = ut.compute_forward_shape(forward_shape, self.kernel_size, self.stride, self.padding)
-        if self.stride > 1:
-            self.backward_padding_kernel = self.padding
-        else:
-            self.backward_padding_kernel = ut.compute_backward_padding(
-                in_shape=forward_shape,
-                out_shape=new_forward_shape,
-                filter_shape=self.kernel_size,
-                stride=self.stride
-            )
-        if self.stride == 1:
-            self.bacwkard_padding_inputs_ = self.kernel_size[0] - self.padding - 1
-        else:
-            self.backward_padding_inputs_ = self.padding
-
-        return new_forward_shape
+        self._input = None
+        self._output_shape = None
 
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
-        if is_training:
-            self.input_ = forward_input
         if self.bias_flag:
             output = [
                 convolved + self.bias for convolved in ut.convolution_generator(
@@ -292,15 +252,28 @@ class Conv2d(ParameterModule):
                     padding=self.padding
                 )
             ]
-        return np.array(output)
+        output = np.array(output)
+        if is_training:
+            self._input = forward_input
+            self._output_shape = output.shape
+        return output
 
     def get_gradients(self, delta: np.ndarray, reg: float) -> List[np.ndarray]:
+        if self.stride > 1:
+            backward_padding_kernel = self.padding
+        else:
+            backward_padding_kernel = ut.compute_backward_padding(
+                in_shape=self._input.shape,
+                out_shape=self._output_shape,
+                filter_shape=self.kernel_size,
+                stride=self.stride
+            )
         grad_w = ut.backward_convolution_kernel(
-            images=self.input_,
+            images=self._input,
             delta=delta,
-            out_shape=self.kernel_size,
+            out_shape=self.weights.shape,
             stride=self.stride,
-            padding=self.backward_padding_kernel
+            padding=backward_padding_kernel
         )
         if self.bias_flag:
             grad_b = np.sum(delta, axis=(0, 1, 2))
@@ -308,12 +281,16 @@ class Conv2d(ParameterModule):
         return [grad_w]
 
     def update_delta(self, delta: np.ndarray) -> np.ndarray:
+        if self.stride == 1:
+            backward_padding_inputs = self.kernel_size[0] - self.padding - 1
+        else:
+            backward_padding_inputs = self.padding
         return ut.backward_convolution_inputs(
             kernel=self.weights,
             delta=delta,
-            out_shape=self.input_.shape,
+            out_shape=self._input.shape,
             stride=self.stride,
-            padding=self.backward_padding_inputs_
+            padding=backward_padding_inputs
         )
 
     def params(self) -> List[np.ndarray]:
@@ -327,11 +304,6 @@ class Pooling(DifferentiableModule):
         self.filter_size = filter_size
         self.stride = stride
         self.gradient = None
-
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        dim_1 = ((forward_shape[0] - self.filter_size[0]) // self.stride) + 1
-        dim_2 = ((forward_shape[1] - self.filter_size[1]) // self.stride) + 1
-        return (dim_1, dim_2)
 
 
 class MaxPooling(Pooling):
@@ -385,6 +357,24 @@ class AveragePooling(Pooling):
         return ut.pool_backward(self.gradient, delta, filter_size=self.filter_size, stride=self.stride)
 
 
+class Flatten(DifferentiableModule):
+    """Class for flattening inputs from N dimensional Tensors to 2D matrices,
+     to be feed as inputs into a feedforward neural network. Assumes input images are all of the same size."""
+    def __init__(self):
+        super().__init__()
+        self._input_shape = None
+
+    def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
+        if is_training:
+            self._input_shape = forward_input.shape
+        dim0 = forward_input.shape[0]
+        dim1 = np.prod(forward_input.shape[1:])
+        return np.reshape(forward_input, newshape=(dim0, dim1))
+
+    def update_delta(self, delta: np.ndarray):
+        return np.reshape(delta, newshape=self._input_shape)
+
+
 class ActivationFunction(DifferentiableModule):
     '''Wrapper class for an activation function'''
     def __init__(self, activation_function: str):
@@ -392,9 +382,6 @@ class ActivationFunction(DifferentiableModule):
         self.activation_function = ACTIVATION_FUNCTIONS[activation_function]
         self.gradient_function = GRADIENT_FUNCTIONS[activation_function]
         self.activations = None
-
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        return forward_shape
 
     def forward(self, forward_input: np.ndarray, is_training=True) -> np.ndarray:
         if is_training:
@@ -445,9 +432,6 @@ class FinalActivationFunction(BaseModule):
     because the gradient with respect to the final activation function will be computed in objective function'''
     def __init__(self):
         super().__init__()
-
-    def set_up(self, forward_shape: Tuple[int, ...]) -> Tuple[int, ...]:
-        return forward_shape
 
 
 class Softmax(FinalActivationFunction):

@@ -1,4 +1,4 @@
-import ann5
+import nnlayers
 import numpy as np
 import utils as ut
 import matplotlib.pyplot as plt
@@ -22,24 +22,24 @@ def main():
         shuffle=False
     )
 
-    model = ann5.Sequential(
+    model = nnlayers.Sequential(
         layers=[
-            ann5.LinearLayer(x_train.shape[1], 512),
-            ann5.ReLU(),
-            ann5.LinearLayer(512, 256),
-            ann5.ReLU(),
-            ann5.LinearLayer(256, 128),
-            ann5.ReLU(),
-            ann5.LinearLayer(128, 64),
-            ann5.ReLU(),
-            ann5.LinearLayer(64, k_classes),
-            ann5.Softmax()
+            nnlayers.LinearLayer(x_train.shape[1], 512),
+            nnlayers.ReLU(),
+            nnlayers.LinearLayer(512, 256),
+            nnlayers.ReLU(),
+            nnlayers.LinearLayer(256, 128),
+            nnlayers.ReLU(),
+            nnlayers.LinearLayer(128, 64),
+            nnlayers.ReLU(),
+            nnlayers.LinearLayer(64, k_classes),
+            nnlayers.Softmax()
         ]
     )
 
     model.set_up(x_train.shape)
-    optimizer = ann5.AdamOptimizer(layers=model.get_layers(), lr=10e-4)
-    criterion = ann5.SparseCategoricalCrossEntropy()
+    optimizer = nnlayers.AdamOptimizer(layers=model.get_layers(), lr=10e-4)
+    criterion = nnlayers.SparseCategoricalCrossEntropy()
     train_losses, validation_losses = [], []
     train_accuracies, validation_accuracies = [], []
     epochs = 40

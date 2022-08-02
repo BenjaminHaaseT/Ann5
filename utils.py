@@ -89,8 +89,8 @@ def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding:
     :return: The result of convolving `image` with `kernel`.
     '''
     # Compute dimensions for the output
-    output_dim1 = ((image.shape[1] + 2 * padding - kernel.shape[0]) // stride) + 1
-    output_dim2 = ((image.shape[2] + 2 * padding - kernel.shape[1]) // stride) + 1
+    output_dim1 = ((image.shape[0] + 2 * padding - kernel.shape[0]) // stride) + 1
+    output_dim2 = ((image.shape[1] + 2 * padding - kernel.shape[1]) // stride) + 1
     output_dim3 = kernel.shape[3]
     output = np.zeros(shape=(output_dim1, output_dim2, output_dim3))
     if padding == 0:
@@ -119,7 +119,7 @@ def convolution(image: np.ndarray, kernel: np.ndarray, stride: int = 1, padding:
                     start_col_im = max((stride * j) - pad_cols, 0)
                     stop_col_im = min((stride * j) - pad_cols + kernel.shape[1], image.shape[1])
                     # Slice kernel and image to take advantage of dot product
-                    im_slice = image[start_row_im: stop_row_im, start_col_im: stop_row_im, :].flatten()
+                    im_slice = image[start_row_im: stop_row_im, start_col_im: stop_col_im, :].flatten()
                     ker_slice = kernel[start_row_k: stop_row_k, start_col_k: stop_col_k, :, c2].flatten()
                     output[i, j, c2] = im_slice.dot(ker_slice)
         return output
@@ -156,8 +156,8 @@ def compute_forward_shape(in_shape: Tuple[int, ...], filter_shape: Tuple[int, ..
     :param padding:
     :return:
     '''
-    dim_1 = ((in_shape[1] - filter_shape[0] + 2 * padding) // stride) + 1
-    dim_2 = ((in_shape[2] - filter_shape[1] + 2 * padding) // stride) + 1
+    dim_1 = ((in_shape[0] - filter_shape[0] + 2 * padding) // stride) + 1
+    dim_2 = ((in_shape[1] - filter_shape[1] + 2 * padding) // stride) + 1
     return (dim_1, dim_2)
 
 
@@ -481,7 +481,12 @@ def get_mnist(normalize=True):
 
 
 class BatchLoader(object):
-    """Simple class for training with batches, meant for supervised learning."""
+    """
+    Simple class for training with batches, meant for supervised learning.
+    Will accept numpy arrays of data and targets and return an iterable object
+    that will automatically return batches of data for gradient descent.
+    """
+
     def __init__(self, data: np.ndarray, targets: np.ndarray, batch_size: int, shuffle: bool = True):
         self.data = data
         self.targets = targets

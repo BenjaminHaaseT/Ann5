@@ -1,4 +1,4 @@
-import ann5
+import nnlayers
 import numpy as np
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
@@ -15,15 +15,15 @@ x_train = scalar.fit_transform(x_train)
 x_valid = scalar.transform(x_valid)
 
 # Instantiate model
-model = ann5.NeuralNetwork(
+model = nnlayers.NeuralNetwork(
     layers=[
-        ann5.LinearLayer(x_train.shape[1], 1),
-        ann5.Sigmoid()
+        nnlayers.LinearLayer(x_train.shape[1], 1),
+        nnlayers.Sigmoid()
     ]
 )
 
-objective_function = ann5.BinaryCrossEntropy()
-optimizer = ann5.AdamOptimizer()
+objective_function = nnlayers.BinaryCrossEntropy()
+optimizer = nnlayers.AdamOptimizer()
 
 # Fit model
 model.fit(

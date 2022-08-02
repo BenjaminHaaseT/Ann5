@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import ann5
+import nnlayers
 import torch
 import torch.nn as nn
 import torchvision
@@ -138,7 +138,7 @@ with torch.no_grad():
 print(f"Final training accuracy: {training_acc:.4f}, Final Testing accuracy: {test_acc:.4f}")
 
 
-# Trial with ann5.py
+# Trial with nnlayers.py
 x_train, y_train = train_data.data, train_data.targets
 x_test, y_test = test_data.data, test_data.targets
 
@@ -158,17 +158,17 @@ x_train /= 255.
 x_test = np.array(test).astype(np.float32)
 x_test /= 255.
 
-model = ann5.NeuralNetwork(
+model = nnlayers.NeuralNetwork(
     layers=[
-        ann5.LinearLayer(x_train.shape[1], 128),
-        ann5.ReLU(),
-        ann5.LinearLayer(128, 10),
-        ann5.Softmax()
+        nnlayers.LinearLayer(x_train.shape[1], 128),
+        nnlayers.ReLU(),
+        nnlayers.LinearLayer(128, 10),
+        nnlayers.Softmax()
     ],
-    objective=ann5.SparseCategoricalCrossEntropy()
+    objective=nnlayers.SparseCategoricalCrossEntropy()
 )
 
-optimizer = ann5.AdamOptimizer()
+optimizer = nnlayers.AdamOptimizer(model.layers)
 
 model.fit(
     x_train=x_train,
@@ -250,11 +250,11 @@ with torch.no_grad():
     plt.show()
 
 # Test with ann5
-model = ann5.NeuralNetwork(
+model = nnlayers.NeuralNetwork(
     layers=[
-        ann5.LinearLayer(n_in=2, n_out=128),
-        ann5.ReLU(),
-        ann5.LinearLayer(128, 1)
+        nnlayers.LinearLayer(n_in=2, n_out=128),
+        nnlayers.ReLU(),
+        nnlayers.LinearLayer(128, 1)
     ],
-    objective=ann5.MeanSquaredError()
+    objective=nnlayers.MeanSquaredError()
 )

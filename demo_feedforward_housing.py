@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import ann5
+import nnlayers
 import torch
 import torch.nn as nn
 from sklearn.datasets import load_boston
@@ -61,24 +61,24 @@ plt.plot(total_loss)
 plt.show()
 
 # Test vs. ann5
-model = ann5.NeuralNetwork(
+model = nnlayers.NeuralNetwork(
     layers=[
-        ann5.LinearLayer(n_in=data.shape[1], n_out=300),
-        ann5.ReLU(),
-        ann5.LinearLayer(n_in=300, n_out=150),
-        ann5.ReLU(),
-        ann5.LinearLayer(n_in=150, n_out=50),
-        ann5.ReLU(),
-        ann5.LinearLayer(50, 1)
+        nnlayers.LinearLayer(n_in=data.shape[1], n_out=300),
+        nnlayers.ReLU(),
+        nnlayers.LinearLayer(n_in=300, n_out=150),
+        nnlayers.ReLU(),
+        nnlayers.LinearLayer(n_in=150, n_out=50),
+        nnlayers.ReLU(),
+        nnlayers.LinearLayer(50, 1)
     ],
-    objective=ann5.MeanSquaredError()
+    objective=nnlayers.MeanSquaredError()
 )
 
 # Use same train data as test data for conveneince
 x_train, y_train = data, targets
 x_test, y_test = data, targets
 
-optimizer = ann5.AdamOptimizer()
+optimizer = nnlayers.AdamOptimizer()
 
 model.fit(
     x_train=x_train,
